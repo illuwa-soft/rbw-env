@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.2/install.sh | bash
 ```
 
-Installs the fixed `v0.1.1` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
+Installs the fixed `v0.1.2` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -36,13 +36,13 @@ Inject variables and replace the process without shell evaluation:
 rbw-env hermes/production -- your-command 'argument with spaces'
 ```
 
-Unlock interactively before unattended startup:
+When the agent is locked, `rbw-env` runs `rbw unlock` once only if standard input is an interactive terminal, then verifies that the agent unlocked before continuing. Noninteractive use fails closed with guidance to unlock manually before retrying:
 
 ```bash
 rbw unlock
 ```
 
-`rbw-env` never unlocks the agent, creates a secret temp file, enables shell tracing, or includes secret values in its own errors or command arguments.
+`rbw-env` never accepts a master password in arguments or environment variables, creates a secret temp file, enables shell tracing, or includes secret values in its own errors or command arguments.
 
 ## Test
 

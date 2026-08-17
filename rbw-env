@@ -38,8 +38,12 @@ else
 fi
 [ -n "$pinentry" ] || fail 'no usable pinentry found (configure rbw pinentry or install pinentry, pinentry-curses, pinentry-tty, or pinentry-mac)'
 
-# shellcheck disable=SC2016 # Backticks are literal user guidance.
-"$rbw" unlocked >/dev/null 2>&1 || fail 'rbw is locked or unavailable; run `rbw unlock` interactively, then retry'
+if ! "$rbw" unlocked >/dev/null 2>&1; then
+  # shellcheck disable=SC2016 # Backticks are literal user guidance.
+  [ -t 0 ] || fail 'rbw is locked or unavailable; run `rbw unlock` interactively, then retry'
+  "$rbw" unlock >/dev/null 2>&1 || fail 'interactive rbw unlock failed'
+  "$rbw" unlocked >/dev/null 2>&1 || fail 'rbw remains locked after interactive unlock'
+fi
 
 if ! list_json=$("$rbw" list --raw 2>/dev/null); then
   fail 'could not enumerate rbw entries'
