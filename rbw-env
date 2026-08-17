@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() { printf 'rbw-env: %s\n' "$1" >&2; exit 1; }
+
+[ "$#" -ge 1 ] || fail 'usage: rbw-env <exact-folder> [-- <command> [args...]]'
+folder=$1
+shift
+[ -n "$folder" ] || fail 'folder must not be empty'
+
+run_command=false
+if [ "$#" -gt 0 ]; then
+  [ "$1" = -- ] || fail 'unexpected arguments (use -- before a command)'
+  shift
+  [ "$#" -gt 0 ] || fail 'command required after --'
+  run_command=true
+fi
+
+for dependency in rbw jq; do
+  command -v "$dependency" >/dev/null 2>&1 || fail "required command not found: $dependency"
+done
+rbw=$(command -v rbw)
+jq=$(command -v jq)
+
+pinentry=''
+configured=$("$rbw" config show 2>/dev/null | "$jq" -er '.pinentry | strings | select(length > 0)' 2>/dev/null || :)
+if [ -n "$configured" ]; then
+  if case "$configured" in */*) [ -x "$configured" ];; *) command -v "$configured" >/dev/null 2>&1;; esac; then
+    pinentry=$configured
+  fi
+fi
+if [ -z "$pinentry" ]; then
+  for candidate in pinentry pinentry-curses pinentry-tty pinentry-mac; do
+    if command -v "$candidate" >/dev/null 2>&1; then pinentry=$candidate; break; fi
+  done
+fi
+[ -n "$pinentry" ] || fail 'no usable pinentry found (configure rbw pinentry or install pinentry, pinentry-curses, pinentry-tty, or pinentry-mac)'
+
+# shellcheck disable=SC2016 # Backticks are literal user guidance.
+"$rbw" unlocked >/dev/null 2>&1 || fail 'rbw is locked or unavailable; run `rbw unlock` interactively, then retry'
+
+if ! list_json=$("$rbw" list --raw 2>/dev/null); then
+  fail 'could not enumerate rbw entries'
+fi
+# shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+if ! entries=$(printf '%s' "$list_json" | "$jq" -er --arg folder "$folder" '
+  if type != "array" or any(.[];
+      type != "object" or
+      (.id | type != "string" or length == 0) or
+      (.name | type != "string" or length == 0) or
+      (.folder | type != "string" and type != "null") or
+      (.type | type != "string" or length == 0))
+  then error("malformed list")
+  elif ([.[] | select(.folder == $folder)] | length) == 0
+  then error("empty folder")
+  elif any(.[] | select(.folder == $folder); .type != "SecureNote")
+  then error("wrong item type")
+  elif ([.[] | select(.folder == $folder) | .id] | group_by(.) | any(length > 1))
+  then error("duplicate id")
+  else .[] | select(.folder == $folder) |
+    if (.id + .name | test("[\\t\\r\\n]")) then error("unsafe metadata")
+    else [.id, .name] | @tsv end
+  end
+' 2>/dev/null); then
+  fail 'folder results are malformed, empty, or ambiguous'
+fi
+
+ids=()
+keys=()
+values=()
+while IFS=$'\t' read -r id key extra; do
+  [ -n "$id" ] && [ -n "$key" ] && [ -z "${extra:-}" ] || fail 'folder results are malformed or ambiguous'
+  [[ $key =~ ^[A-Z_][A-Z0-9_]*$ ]] || fail 'an item name is not a valid environment variable'
+  for existing in "${keys[@]:-}"; do
+    [ "$existing" != "$key" ] || fail 'duplicate environment variable name'
+  done
+  ids+=("$id")
+  keys+=("$key")
+done <<<"$entries"
+[ "${#keys[@]}" -gt 0 ] || fail 'folder results are malformed or empty'
+
+for ((i=0; i<${#keys[@]}; i++)); do
+  # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+  if ! value=$("$rbw" get "${ids[$i]}" --raw 2>/dev/null | "$jq" -er \
+      --arg id "${ids[$i]}" --arg folder "$folder" --arg name "${keys[$i]}" '
+        select(type == "object" and .id == $id and .folder == $folder and .name == $name and
+          .data == "SecureNote" and (.notes | type) == "string") |
+        (.notes | split("\n")[0] | rtrimstr("\r")) as $value |
+        select(($value | length) > 0 and ($value | contains("\u0000") | not)) |
+        $value
+      ' 2>/dev/null); then
+    fail 'a Secure Note is missing, malformed, ambiguous, or has an empty first line'
+  fi
+  values+=("$value")
+done
+
+if $run_command; then
+  for ((i=0; i<${#keys[@]}; i++)); do
+    printf -v "${keys[$i]}" '%s' "${values[$i]}"
+    export "${keys[$i]}"
+  done
+  exec "$@"
+fi
+
+for ((i=0; i<${#keys[@]}; i++)); do
+  printf '%s=%s\n' "${keys[$i]}" "${values[$i]}"
+done
