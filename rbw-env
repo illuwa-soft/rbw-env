@@ -90,7 +90,7 @@ for ((i=0; i<${#keys[@]}; i++)); do
   if ! value=$("$rbw" get "${ids[$i]}" --raw 2>/dev/null | "$jq" -er \
       --arg id "${ids[$i]}" --arg folder "$folder" --arg name "${keys[$i]}" '
         select(type == "object" and .id == $id and .folder == $folder and .name == $name and
-          .data == "SecureNote" and (.notes | type) == "string") |
+          has("data") and .data == null and (.notes | type) == "string") |
         (.notes | split("\n")[0] | rtrimstr("\r")) as $value |
         select(($value | length) > 0 and ($value | contains("\u0000") | not)) |
         $value
