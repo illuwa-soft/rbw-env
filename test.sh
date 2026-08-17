@@ -6,6 +6,7 @@ TMP=${TMPDIR:-/tmp}/rbw-env-test.$$
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-pinentry" "$TMP/home" "$TMP/install"
 REAL_JQ=$(command -v jq)
+PYTHON3=$(command -v python3)
 export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_CURL_LOG="$TMP/curl.log"
 
 cat >"$TMP/bin/jq" <<'SH'
@@ -20,7 +21,7 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.1/rbw-env' ] || exit 22
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.2/rbw-env' ] || exit 22
 case "${RBW_CURL_CASE:-ok}" in
   corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
   symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
@@ -42,11 +43,37 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     actual = parse_secret_output(stream.read(), "API_TOKEN")
 assert actual == os.environ["EXPECTED"], (actual, os.environ["EXPECTED"])
 PY
+cat >"$TMP/pty-run.py" <<'PY'
+import os
+import pty
+import subprocess
+import sys
+
+master, slave = pty.openpty()
+with open(sys.argv[1], "wb") as stdout, open(sys.argv[2], "wb") as stderr:
+    result = subprocess.run(sys.argv[3:], stdin=slave, stdout=stdout, stderr=stderr)
+os.close(slave)
+os.close(master)
+sys.exit(result.returncode)
+PY
 cat >"$TMP/bin/rbw" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >>"$RBW_LOG"
 case "$1" in
-  unlocked) [ "${RBW_CASE:-ok}" != locked ] ;;
+  unlocked)
+    case "${RBW_CASE:-ok}" in
+      locked|unlock_fail|recheck_fail) exit 1 ;;
+      interactive) [ -f "$RBW_STATE" ] ;;
+    esac ;;
+  unlock)
+    printf '%s\n' SECRET_UNLOCK_STDOUT_SENTINEL
+    printf '%s\n' SECRET_UNLOCK_STDERR_SENTINEL >&2
+    case "${RBW_CASE:-ok}" in
+      interactive) : >"$RBW_STATE" ;;
+      unlock_fail) exit 1 ;;
+      recheck_fail) : ;;
+      *) exit 2 ;;
+    esac ;;
   config) "$REAL_JQ" -cn --arg pinentry "${RBW_CONFIG_PINENTRY-pinentry}" '{pinentry:$pinentry}' ;;
   list)
     case "${RBW_CASE:-ok}" in
@@ -78,10 +105,12 @@ pass=0
 fail() { printf 'not ok - %s\n' "$1"; exit 1; }
 check() { name=$1; shift; "$@" || fail "$name"; pass=$((pass + 1)); printf 'ok %s - %s\n' "$pass" "$name"; }
 run() { out=$1; err=$2; shift 2; PATH="$TMP/bin" /bin/bash "$ROOT/rbw-env" "$@" >"$out" 2>"$err"; }
+run_tty() { out=$1; err=$2; shift 2; PATH="$TMP/bin" "$PYTHON3" "$TMP/pty-run.py" "$out" "$err" /bin/bash "$ROOT/rbw-env" "$@"; }
 run_install() { PATH="$TMP/bin:/usr/bin:/bin:/sbin" HOME="$TMP/home" RBW_ENV_INSTALL_DIR="$TMP/install" /bin/bash "$ROOT/install.sh" >"$TMP/out" 2>"$TMP/err"; }
 equals() { [ "$(cat "$1")" = "$2" ]; }
 contains() { case $(cat "$1") in *"$2"*) return 0;; *) return 1;; esac; }
 not_contains() { ! contains "$1" "$2"; }
+count_log() { [ "$(grep -c "^$2$" "$1" || :)" -eq "$3" ]; }
 
 : >"$RBW_LOG"
 run "$TMP/out" "$TMP/err" target || fail dotenv
@@ -124,8 +153,36 @@ fi
 check "configured pinentry mismatch is rejected" contains "$TMP/err" 'configured rbw pinentry is unusable'
 check "configured pinentry value does not leak" not_contains "$TMP/err" SECRET_PINENTRY_SENTINEL
 
-if RBW_CASE=locked run "$TMP/out" "$TMP/err" target; then fail "locked vault accepted"; fi
-check "locked vault instructs explicit unlock" contains "$TMP/err" 'rbw unlock'
+: >"$RBW_LOG"
+if RBW_CASE=locked run "$TMP/out" "$TMP/err" target; then fail "noninteractive locked vault accepted"; fi
+# shellcheck disable=SC2016 # Backticks are literal expected guidance.
+check "noninteractive locked vault instructs explicit manual unlock" contains "$TMP/err" 'run `rbw unlock` interactively'
+check "noninteractive locked vault never attempts unlock" count_log "$RBW_LOG" unlock 0
+
+rm -f "$TMP/rbw.state"
+: >"$RBW_LOG"
+if ! RBW_CASE=interactive RBW_STATE="$TMP/rbw.state" run_tty "$TMP/out" "$TMP/err" target; then
+  fail "interactive locked vault did not unlock"
+fi
+check "interactive locked vault emits dotenv after unlocking" equals "$TMP/out" "API_TOKEN='fake-value'"
+check "interactive locked vault attempts exact unlock once" count_log "$RBW_LOG" unlock 1
+check "interactive locked vault checks unlocked state twice" count_log "$RBW_LOG" unlocked 2
+check "interactive unlock output is suppressed" not_contains "$TMP/out" SECRET_UNLOCK_
+check "interactive unlock errors are value-free" not_contains "$TMP/err" SECRET_UNLOCK_
+
+for unlock_case in unlock_fail recheck_fail; do
+  : >"$RBW_LOG"
+  if RBW_CASE=$unlock_case run_tty "$TMP/out" "$TMP/err" target; then fail "$unlock_case accepted"; fi
+  case $unlock_case in
+    unlock_fail) expected_checks=1; expected_error='interactive rbw unlock failed' ;;
+    recheck_fail) expected_checks=2; expected_error='rbw remains locked after interactive unlock' ;;
+  esac
+  check "$unlock_case attempts exact unlock once" count_log "$RBW_LOG" unlock 1
+  check "$unlock_case has exact unlocked check count" count_log "$RBW_LOG" unlocked "$expected_checks"
+  check "$unlock_case reports a generic failure" contains "$TMP/err" "$expected_error"
+  check "$unlock_case failure is value-free" not_contains "$TMP/err" SECRET_UNLOCK_
+  check "$unlock_case emits no secret output" test ! -s "$TMP/out"
+done
 
 for case_name in invalid emptykey duplicate empty nul malformed; do
   if RBW_CASE=$case_name run "$TMP/out" "$TMP/err" target; then fail "$case_name accepted"; fi
@@ -138,7 +195,7 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.1.1" contains "$RBW_CURL_LOG" '/v0.1.1/rbw-env'
+check "installer ignores mutable ref override and uses v0.1.2" contains "$RBW_CURL_LOG" '/v0.1.2/rbw-env'
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"
 if RBW_CURL_CASE=corrupt run_install; then fail "checksum mismatch accepted"; fi
