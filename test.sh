@@ -21,7 +21,7 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.2/rbw-env' ] || exit 22
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.3/rbw-env' ] || exit 22
 case "${RBW_CURL_CASE:-ok}" in
   corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
   symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
@@ -87,11 +87,13 @@ case "$1" in
     esac ;;
   get)
     case "${RBW_CASE:-ok}:$2" in
-      empty:3) printf '%s\n' '{"id":"3","folder":"target","name":"EMPTY","data":"SecureNote","fields":[],"notes":"\nignored"}' ;;
-      nul:4) printf '%s\n' '{"id":"4","folder":"target","name":"NUL_VALUE","data":"SecureNote","fields":[],"notes":"before\u0000after\nignored"}' ;;
+      empty:3) printf '%s\n' '{"id":"3","folder":"target","name":"EMPTY","data":null,"fields":[],"notes":"\nignored"}' ;;
+      nul:4) printf '%s\n' '{"id":"4","folder":"target","name":"NUL_VALUE","data":null,"fields":[],"notes":"before\u0000after\nignored"}' ;;
+      data_nonnull:1) printf '%s\n' '{"id":"1","folder":"target","name":"API_TOKEN","data":"SecureNote","fields":[],"notes":"fake-value\nhuman memo SECRET_MEMO_SENTINEL"}' ;;
+      data_missing:1) printf '%s\n' '{"id":"1","folder":"target","name":"API_TOKEN","fields":[],"notes":"fake-value\nhuman memo SECRET_MEMO_SENTINEL"}' ;;
       *:1) "$REAL_JQ" -cn --arg notes "${RBW_VALUE:-fake-value}"$'\nhuman memo SECRET_MEMO_SENTINEL' \
-        '{id:"1",folder:"target",name:"API_TOKEN",data:"SecureNote",fields:[],notes:$notes}' ;;
-      *) printf '%s\n' '{"id":"9","folder":"other","name":"OTHER","data":"SecureNote","fields":[],"notes":"SHOULD_NOT_APPEAR"}' ;;
+        '{id:"1",folder:"target",name:"API_TOKEN",data:null,fields:[],notes:$notes}' ;;
+      *) printf '%s\n' '{"id":"9","folder":"other","name":"OTHER","data":null,"fields":[],"notes":"SHOULD_NOT_APPEAR"}' ;;
     esac ;;
   *) exit 2 ;;
 esac
@@ -114,7 +116,7 @@ count_log() { [ "$(grep -c "^$2$" "$1" || :)" -eq "$3" ]; }
 
 : >"$RBW_LOG"
 run "$TMP/out" "$TMP/err" target || fail dotenv
-check "real rbw 1.15 Note-list/SecureNote-get contract and first Notes line" equals "$TMP/out" "API_TOKEN='fake-value'"
+check "real rbw 1.15 Note-list/null-data detail contract and first Notes line" equals "$TMP/out" "API_TOKEN='fake-value'"
 check "exact folder only" not_contains "$TMP/out" SHOULD_NOT_APPEAR
 check "rbw list is raw and unscoped for exact local filtering" contains "$RBW_LOG" 'list --raw'
 
@@ -184,7 +186,7 @@ for unlock_case in unlock_fail recheck_fail; do
   check "$unlock_case emits no secret output" test ! -s "$TMP/out"
 done
 
-for case_name in invalid emptykey duplicate empty nul malformed; do
+for case_name in invalid emptykey duplicate empty nul malformed data_nonnull data_missing; do
   if RBW_CASE=$case_name run "$TMP/out" "$TMP/err" target; then fail "$case_name accepted"; fi
   check "$case_name input fails without value leakage" not_contains "$TMP/err" 'fake-value'
 done
@@ -195,7 +197,7 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.1.2" contains "$RBW_CURL_LOG" '/v0.1.2/rbw-env'
+check "installer ignores mutable ref override and uses v0.1.3" contains "$RBW_CURL_LOG" '/v0.1.3/rbw-env'
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"
 if RBW_CURL_CASE=corrupt run_install; then fail "checksum mismatch accepted"; fi

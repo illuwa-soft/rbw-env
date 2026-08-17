@@ -30,11 +30,11 @@ umask 077
 mkdir -p "$install_dir"
 pending=$(mktemp "$install_dir/.rbw-env.XXXXXX") || fail 'could not create installer staging file'
 trap 'rm -f "$pending"' EXIT HUP INT TERM
-if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.2/rbw-env" -o "$pending"; then
+if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.3/rbw-env" -o "$pending"; then
   fail 'download failed'
 fi
 [ -f "$pending" ] && [ ! -L "$pending" ] || fail 'download is not a regular file'
-expected=3468466504026eef43efa28f5a945b29e368413936df3920ce960d281e868832
+expected=67840547f53fe5ce6b3bc64068670698d1fa2ef4ea4bfec79ef444b859c6108d
 if command -v sha256sum >/dev/null 2>&1; then
   checksum=$(sha256sum "$pending") || fail 'checksum calculation failed'
 elif command -v shasum >/dev/null 2>&1; then
