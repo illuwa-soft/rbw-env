@@ -27,9 +27,11 @@ configured=$("$rbw" config show 2>/dev/null | "$jq" -er '.pinentry | strings | s
 if [ -n "$configured" ]; then
   if case "$configured" in */*) [ -x "$configured" ];; *) command -v "$configured" >/dev/null 2>&1;; esac; then
     pinentry=$configured
+  else
+    # shellcheck disable=SC2016 # Backticks are literal remediation guidance.
+    fail 'configured rbw pinentry is unusable; update it with `rbw config set pinentry <command-or-path>`'
   fi
-fi
-if [ -z "$pinentry" ]; then
+else
   for candidate in pinentry pinentry-curses pinentry-tty pinentry-mac; do
     if command -v "$candidate" >/dev/null 2>&1; then pinentry=$candidate; break; fi
   done
@@ -53,7 +55,7 @@ if ! entries=$(printf '%s' "$list_json" | "$jq" -er --arg folder "$folder" '
   then error("malformed list")
   elif ([.[] | select(.folder == $folder)] | length) == 0
   then error("empty folder")
-  elif any(.[] | select(.folder == $folder); .type != "SecureNote")
+  elif any(.[] | select(.folder == $folder); .type != "Note")
   then error("wrong item type")
   elif ([.[] | select(.folder == $folder) | .id] | group_by(.) | any(length > 1))
   then error("duplicate id")
@@ -103,5 +105,5 @@ if $run_command; then
 fi
 
 for ((i=0; i<${#keys[@]}; i++)); do
-  printf '%s=%s\n' "${keys[$i]}" "${values[$i]}"
+  printf "%s='%s'\n" "${keys[$i]}" "${values[$i]}"
 done

@@ -2,7 +2,7 @@
 set -eu
 
 fail() { printf 'rbw-env installer: %s\n' "$1" >&2; exit 1; }
-for dependency in curl rbw jq; do
+for dependency in curl rbw jq mktemp; do
   command -v "$dependency" >/dev/null 2>&1 || fail "required command not found: $dependency"
 done
 
@@ -13,9 +13,11 @@ configured=$("$rbw" config show 2>/dev/null | "$jq" -er '.pinentry | strings | s
 if [ -n "$configured" ]; then
   if case "$configured" in */*) [ -x "$configured" ];; *) command -v "$configured" >/dev/null 2>&1;; esac; then
     pinentry=$configured
+  else
+    # shellcheck disable=SC2016 # Backticks are literal remediation guidance.
+    fail 'configured rbw pinentry is unusable; update it with `rbw config set pinentry <command-or-path>`'
   fi
-fi
-if [ -z "$pinentry" ]; then
+else
   for candidate in pinentry pinentry-curses pinentry-tty pinentry-mac; do
     if command -v "$candidate" >/dev/null 2>&1; then pinentry=$candidate; break; fi
   done
@@ -23,14 +25,24 @@ fi
 [ -n "$pinentry" ] || fail 'no usable pinentry found (configure rbw pinentry or install one)'
 
 install_dir=${RBW_ENV_INSTALL_DIR:-"$HOME/.local/bin"}
-version=${RBW_ENV_VERSION:-v0.1.0}
 destination=$install_dir/rbw-env
-pending=$destination.new.$$
-trap 'rm -f "$pending"' EXIT HUP INT TERM
+umask 077
 mkdir -p "$install_dir"
-if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/$version/rbw-env" -o "$pending"; then
+pending=$(mktemp "$install_dir/.rbw-env.XXXXXX") || fail 'could not create installer staging file'
+trap 'rm -f "$pending"' EXIT HUP INT TERM
+if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.1/rbw-env" -o "$pending"; then
   fail 'download failed'
 fi
+[ -f "$pending" ] && [ ! -L "$pending" ] || fail 'download is not a regular file'
+expected=a03c2e77400e17c85be6c2f82004592b2d609dd397d9f64ec082b201327df7e7
+if command -v sha256sum >/dev/null 2>&1; then
+  checksum=$(sha256sum "$pending") || fail 'checksum calculation failed'
+elif command -v shasum >/dev/null 2>&1; then
+  checksum=$(shasum -a 256 "$pending") || fail 'checksum calculation failed'
+else
+  fail 'required SHA-256 command not found (install sha256sum or shasum)'
+fi
+[ "${checksum%% *}" = "$expected" ] || fail 'download checksum mismatch'
 chmod 755 "$pending"
 mv -f "$pending" "$destination"
 trap - EXIT HUP INT TERM

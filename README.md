@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.1/install.sh | bash
 ```
 
-Installs to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}` and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, and a usable configured or PATH-discoverable pinentry implementation.
+Installs the fixed `v0.1.1` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -22,11 +22,13 @@ Only items whose folder name exactly matches the argument are used. Child folder
 
 ## Usage
 
-Emit dotenv lines for Hermes `secrets.command`:
+Emit lines for a Hermes command secret source:
 
 ```bash
 rbw-env hermes/production
 ```
+
+Stdout uses Hermes command-secret syntax: every raw first-line value is wrapped in one pair of single quotes because Hermes strips one matching outer quote layer without processing escapes. This preserves spaces, `#`, quotes, backslashes, dollars, and `=` for that parser. The output is deliberately **not** universal shell, `source`, or python-dotenv syntax.
 
 Inject variables and replace the process without shell evaluation:
 
@@ -48,4 +50,4 @@ rbw unlock
 ./test.sh
 ```
 
-The test uses fake `rbw`, `jq`, and pinentry commands and never contacts a vault.
+The dependency-free test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and the installed Hermes parser. It never contacts a vault or the network.
