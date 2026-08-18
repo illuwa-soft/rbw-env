@@ -4,7 +4,8 @@ set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 TMP=${TMPDIR:-/tmp}/rbw-env-test.$$
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-pinentry" "$TMP/home" "$TMP/install"
+mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-pinentry" "$TMP/with-deps" "$TMP/home" "$TMP/install"
+mkdir -p "$TMP/home/.local/bin"
 REAL_JQ=$(command -v jq)
 PYTHON3=$(command -v python3)
 export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_CURL_LOG="$TMP/curl.log"
@@ -27,6 +28,15 @@ case "${RBW_CURL_CASE:-ok}" in
   symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
   *) cp "$RBW_DOWNLOAD_SOURCE" "$4" ;;
 esac
+SH
+cat >"$TMP/bin/sha256sum" <<'SH'
+#!/bin/bash
+[ "$#" -eq 1 ] || exit 2
+if cmp -s "$1" "$RBW_DOWNLOAD_SOURCE"; then
+  printf '67840547f53fe5ce6b3bc64068670698d1fa2ef4ea4bfec79ef444b859c6108d  %s\n' "$1"
+else
+  printf 'mismatch  %s\n' "$1"
+fi
 SH
 cat >"$TMP/bin/show-env" <<'SH'
 #!/bin/bash
@@ -102,6 +112,9 @@ chmod +x "$TMP/bin/"*
 cp "$TMP/bin/rbw" "$TMP/no-jq/rbw"
 cp "$TMP/bin/rbw" "$TMP/no-pinentry/rbw"
 cp "$TMP/bin/jq" "$TMP/no-pinentry/jq"
+cp "$TMP/bin/jq" "$TMP/with-deps/jq"
+cp "$TMP/bin/pinentry" "$TMP/with-deps/pinentry"
+cp "$TMP/bin/rbw" "$TMP/home/.local/bin/rbw"
 
 pass=0
 fail() { printf 'not ok - %s\n' "$1"; exit 1; }
@@ -119,6 +132,9 @@ run "$TMP/out" "$TMP/err" target || fail dotenv
 check "real rbw 1.15 Note-list/null-data detail contract and first Notes line" equals "$TMP/out" "API_TOKEN='fake-value'"
 check "exact folder only" not_contains "$TMP/out" SHOULD_NOT_APPEAR
 check "rbw list is raw and unscoped for exact local filtering" contains "$RBW_LOG" 'list --raw'
+
+run_home_bin() { HOME="$TMP/home" PATH="$TMP/with-deps" BASH_ENV='' ENV='' REAL_JQ="$REAL_JQ" /bin/bash "$ROOT/rbw-env" target >"$TMP/out" 2>"$TMP/err"; equals "$TMP/out" "API_TOKEN='fake-value'"; }
+check "rbw resolves from conventional HOME user bin when PATH omits it" run_home_bin
 
 HERMES_PYTHON=${HERMES_PYTHON:-}
 if [ -z "$HERMES_PYTHON" ]; then
