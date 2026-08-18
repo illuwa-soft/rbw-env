@@ -8,6 +8,10 @@ folder=$1
 shift
 [ -n "$folder" ] || fail 'folder must not be empty'
 
+if [ -n "${HOME:-}" ]; then
+  PATH=${PATH:+$PATH:}$HOME/.cargo/bin:$HOME/.local/bin
+fi
+
 run_command=false
 if [ "$#" -gt 0 ]; then
   [ "$1" = -- ] || fail 'unexpected arguments (use -- before a command)'
