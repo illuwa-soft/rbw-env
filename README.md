@@ -22,6 +22,22 @@ Only items whose folder name exactly matches the argument are used. Child folder
 
 ## Usage
 
+List usable Secure Note selectors without fetching secret values:
+
+```bash
+rbw-env list
+```
+
+Read one value by selector:
+
+```bash
+API_TOKEN=$(rbw-env show hermes/production/API_TOKEN)
+```
+
+`show` deliberately writes the secret value to stdout. Normally use command substitution as above; do not send its output to logs.
+
+`list` and `show` are reserved subcommands. To use either word as an exact folder name, disambiguate it with `--folder`, for example `rbw-env --folder list`.
+
 Emit lines for a Hermes command secret source:
 
 ```bash
