@@ -1,0 +1,28 @@
+#compdef rbw-env
+
+_rbw-env() {
+  if (( CURRENT == 2 )); then
+    local -a commands=(
+      'list:list usable selectors'
+      'show:print one selected value'
+      '--folder:use a reserved word as an exact folder'
+    )
+    _describe -t commands 'rbw-env command' commands
+    return
+  fi
+
+  if (( CURRENT == 3 )) && [[ ${words[2]} == show ]]; then
+    local candidate
+    local -a folders leaves
+    while IFS= read -r candidate; do
+      [[ -n $candidate ]] || continue
+      if [[ $candidate == */ ]]; then
+        folders+=("$candidate")
+      else
+        leaves+=("$candidate")
+      fi
+    done < <(RBW_ENV_INTERNAL_COMPLETE=1 command rbw-env __complete-show "${words[CURRENT]}" 2>/dev/null)
+    (( ${#folders} )) && compadd -S '' -- "${folders[@]}"
+    (( ${#leaves} )) && compadd -- "${leaves[@]}"
+  fi
+}

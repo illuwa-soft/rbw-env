@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/install.sh | bash
 ```
 
-Installs the fixed `v0.3.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. Install `jq` separately with your system package manager (for example, `brew install jq` on macOS); the installer never installs packages. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
+Installs the fixed `v0.4.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}` and its zsh completion to `${RBW_ENV_ZSH_COMPLETION_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions}`, verifies separate checked-in SHA-256 values, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. Install `jq` separately with your system package manager (for example, `brew install jq` on macOS); the installer never installs packages. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -41,6 +41,17 @@ API_TOKEN="$(rbw-env show hermes/production/API_TOKEN)"
 ```
 
 `show` deliberately writes the secret value to stdout. Normally use command substitution as above; do not send its output to logs.
+
+### Zsh completion
+
+Add the installed completion directory to `fpath`, then initialize zsh completion:
+
+```zsh
+fpath=("${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions" $fpath)
+autoload -Uz compinit && compinit
+```
+
+`rbw-env show env/<TAB>` then completes validated metadata paths incrementally. The vault must already be unlocked; completion never prompts or unlocks it.
 
 `list` and `show` are reserved subcommands. To use either word as an exact folder name, disambiguate it with `--folder`, for example `rbw-env --folder list`.
 
