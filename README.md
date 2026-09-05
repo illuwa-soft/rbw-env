@@ -31,7 +31,8 @@ rbw-env list
 Read one value by selector:
 
 ```bash
-API_TOKEN=$(rbw-env show hermes/production/API_TOKEN)
+rbw-env show hermes/production/API_TOKEN
+API_TOKEN="$(rbw-env show hermes/production/API_TOKEN)"
 ```
 
 `show` deliberately writes the secret value to stdout. Normally use command substitution as above; do not send its output to logs.
