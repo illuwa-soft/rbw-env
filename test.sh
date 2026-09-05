@@ -4,11 +4,12 @@ set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 TMP=${TMPDIR:-/tmp}/rbw-env-test.$$
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-jq-install" "$TMP/no-pinentry" "$TMP/with-deps" "$TMP/home" "$TMP/install"
+mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-jq-install" "$TMP/no-pinentry" "$TMP/with-deps" "$TMP/home" "$TMP/install" "$TMP/completions"
 mkdir -p "$TMP/home/.local/bin"
+printf '%s\n' 'PROFILE_SENTINEL' >"$TMP/home/.zshrc"
 REAL_JQ=$(command -v jq)
 PYTHON3=$(command -v python3)
-export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
+export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_COMPLETION_DOWNLOAD_SOURCE="$ROOT/_rbw-env" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
 
 cat >"$TMP/bin/jq" <<'SH'
 #!/bin/bash
@@ -22,21 +23,29 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/rbw-env' ] || exit 22
-case "${RBW_CURL_CASE:-ok}" in
-  corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
-  symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
-  *) cp "$RBW_DOWNLOAD_SOURCE" "$4" ;;
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/rbw-env' ] ||
+  [ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/_rbw-env' ] || exit 22
+case "$2:${RBW_CURL_CASE:-ok}" in
+  */rbw-env:corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
+  */_rbw-env:corrupt_completion) printf '%s\n' SECRET_CORRUPT_COMPLETION_DOWNLOAD >"$4" ;;
+  */rbw-env:symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
+  */_rbw-env:symlink_completion) rm -f "$4"; ln -s "$RBW_COMPLETION_DOWNLOAD_SOURCE" "$4" ;;
+  */rbw-env:*) cp "$RBW_DOWNLOAD_SOURCE" "$4" ;;
+  */_rbw-env:*) cp "$RBW_COMPLETION_DOWNLOAD_SOURCE" "$4" ;;
 esac
 SH
 cat >"$TMP/bin/sha256sum" <<'SH'
 #!/bin/bash
 [ "$#" -eq 1 ] || exit 2
-if cmp -s "$1" "$RBW_DOWNLOAD_SOURCE"; then
-  printf '64d73d8b9e8e584643432c4c43940cd08ce5af34a091239e8e3da3c4783da47f  %s\n' "$1"
-else
-  printf 'mismatch  %s\n' "$1"
+exec /usr/bin/shasum -a 256 "$1"
+SH
+cat >"$TMP/bin/mv" <<'SH'
+#!/bin/bash
+if [ "${RBW_MV_CASE:-}" = completion_fail ] && [ "$#" -eq 3 ] &&
+    [ "$1" = -f ] && [ "$3" = "$RBW_TEST_COMPLETION_DEST" ]; then
+  case ${2##*/} in ._rbw-env.??????) exit 1;; esac
 fi
+exec /bin/mv "$@"
 SH
 cat >"$TMP/bin/show-env" <<'SH'
 #!/bin/bash
@@ -93,6 +102,9 @@ case "$1" in
       list_duplicate) printf '%s\n' '[{"id":"12","name":"API_TOKEN","folder":"team/prod","type":"Note"},{"id":"13","name":"API_TOKEN","folder":"team/prod","type":"Note"}]' ;;
       list_duplicate_id) printf '%s\n' '[{"id":"12","name":"API_TOKEN","folder":"team/prod","type":"Note"},{"id":"12","name":"OTHER_KEY","folder":"other","type":"Note"}]' ;;
       list_malformed) printf '%s\n' '[{"id":"14","name":"SECRET_LIST_METADATA_SENTINEL","folder":"team/prod"}]' ;;
+      completion) printf '%s\n' '[{"id":"41","name":"API_KEY","folder":"env/prod","type":"Note"},{"id":"42","name":"ROOT","folder":"env","type":"Note"},{"id":"43","name":"CHILD","folder":"env/team space","type":"Note"},{"id":"44","name":"DEEP","folder":"env/team space/deep:slash\\back","type":"Note"},{"id":"45","name":"PROD","folder":"env","type":"Note"},{"id":"46","name":"LEAF","folder":"env/PROD","type":"Note"}]' ;;
+      completion_locked) exit 1 ;;
+      reserved_internal) printf '%s\n' '[{"id":"47","name":"API_TOKEN","folder":"__complete-show","type":"Note"}]' ;;
       multi_list) printf '%s\n%s\n' '[{"id":"21","name":"API_TOKEN","folder":"team/prod","type":"Note"}]' '[{"id":"21","name":"API_TOKEN","folder":"team/prod","type":"Note"}]' ;;
       folder_multi_list) printf '%s\n%s\n' '[{"id":"1","name":"API_TOKEN","folder":"target","type":"Note"}]' '[{"id":"1","name":"API_TOKEN","folder":"target","type":"Note"}]' ;;
       folder_multi_detail) printf '%s\n' '[{"id":"1","name":"API_TOKEN","folder":"target","type":"Note"}]' ;;
@@ -136,6 +148,7 @@ case "$1" in
         '{"id":"21","folder":"team/prod","name":"API_TOKEN","data":null,"notes":"show-value"}' ;;
       reserved_list:31) printf '%s\n' '{"id":"31","folder":"list","name":"API_TOKEN","data":null,"notes":"fake-value"}' ;;
       reserved_show:32) printf '%s\n' '{"id":"32","folder":"show","name":"API_TOKEN","data":null,"notes":"fake-value"}' ;;
+      reserved_internal:47) printf '%s\n' '{"id":"47","folder":"__complete-show","name":"API_TOKEN","data":null,"notes":"fake-value"}' ;;
       folder_multi_detail:1) printf '%s\n%s\n' \
         '{"id":"1","folder":"target","name":"API_TOKEN","data":null,"notes":"fake-value"}' \
         '{"id":"1","folder":"target","name":"API_TOKEN","data":null,"notes":"fake-value"}' ;;
@@ -147,6 +160,8 @@ case "$1" in
 esac
 SH
 chmod +x "$TMP/bin/"*
+ln -s /bin/bash "$TMP/bin/bash"
+ln -s "$ROOT/rbw-env" "$TMP/bin/rbw-env"
 cp "$TMP/bin/rbw" "$TMP/no-jq/rbw"
 cp "$TMP/bin/rbw" "$TMP/bin/curl" "$TMP/no-jq-install/"
 for command in brew apt-get apt yum dnf pacman sudo; do
@@ -167,8 +182,9 @@ pass=0
 fail() { printf 'not ok - %s\n' "$1"; exit 1; }
 check() { name=$1; shift; "$@" || fail "$name"; pass=$((pass + 1)); printf 'ok %s - %s\n' "$pass" "$name"; }
 run() { out=$1; err=$2; shift 2; PATH="$TMP/bin" /bin/bash "$ROOT/rbw-env" "$@" >"$out" 2>"$err"; }
+run_complete() { out=$1; err=$2; shift 2; RBW_ENV_INTERNAL_COMPLETE=1 PATH="$TMP/bin" /bin/bash "$ROOT/rbw-env" __complete-show "$@" >"$out" 2>"$err"; }
 run_tty() { out=$1; err=$2; shift 2; PATH="$TMP/bin" "$PYTHON3" "$TMP/pty-run.py" "$out" "$err" /bin/bash "$ROOT/rbw-env" "$@"; }
-run_install() { PATH="$TMP/bin:/usr/bin:/bin:/sbin" HOME="$TMP/home" RBW_ENV_INSTALL_DIR="$TMP/install" /bin/bash "$ROOT/install.sh" >"$TMP/out" 2>"$TMP/err"; }
+run_install() { PATH="$TMP/bin:/usr/bin:/bin:/sbin" HOME="$TMP/home" RBW_ENV_INSTALL_DIR="$TMP/install" RBW_ENV_ZSH_COMPLETION_DIR="$TMP/completions" /bin/bash "$ROOT/install.sh" >"$TMP/out" 2>"$TMP/err"; }
 equals() { [ "$(cat "$1")" = "$2" ]; }
 contains() { case $(cat "$1") in *"$2"*) return 0;; *) return 1;; esac; }
 not_contains() { ! contains "$1" "$2"; }
@@ -236,10 +252,72 @@ check "show requires one selector" test ! -s "$TMP/out"
 if RBW_CASE=show_ok run "$TMP/out" "$TMP/err" show team/prod/API_TOKEN extra; then fail "show extra argument accepted"; fi
 check "show rejects extra arguments" test ! -s "$TMP/out"
 
+# __complete-show is an internal, metadata-only contract used by _rbw-env.
+: >"$RBW_LOG"
+RBW_CASE=completion run_complete "$TMP/out" "$TMP/err" 'env/' || fail "completion metadata projection"
+check "completion returns only immediate hierarchical candidates including a folder/leaf collision" equals "$TMP/out" $'env/PROD\nenv/PROD/\nenv/ROOT\nenv/prod/\nenv/team space/'
+RBW_CASE=completion run_complete "$TMP/out" "$TMP/err" 'env/team space/' || fail "completion deep prefix"
+check "completion preserves spaces and special path characters" equals "$TMP/out" $'env/team space/CHILD\nenv/team space/deep:slash\\back/'
+RBW_CASE=completion run_complete "$TMP/out" "$TMP/err" 'env/PROD' || fail "completion exact collision prefix"
+check "completion preserves an exact leaf alongside its folder collision" equals "$TMP/out" $'env/PROD\nenv/PROD/'
+check "completion uses one raw metadata listing per request" count_log "$RBW_LOG" 'list --raw' 3
+check "completion checks unlocked state without reading config" count_log "$RBW_LOG" unlocked 3
+check "completion never reads config" count_prefix_log "$RBW_LOG" 'config' 0
+check "completion never unlocks" count_log "$RBW_LOG" unlock 0
+check "completion never fetches item details" count_prefix_log "$RBW_LOG" 'get ' 0
+RBW_CASE=locked run_complete "$TMP/out" "$TMP/err" 'env/' || fail "locked completion should be silent success"
+check "locked or unavailable completion returns no candidates" test ! -s "$TMP/out"
+check "locked or unavailable completion returns no errors" test ! -s "$TMP/err"
+check "locked completion stops before listing metadata" count_log "$RBW_LOG" 'list --raw' 3
+check "locked completion never invokes unlock" count_log "$RBW_LOG" unlock 0
+RBW_CASE=list_malformed run_complete "$TMP/out" "$TMP/err" 'env/' || fail "malformed completion should be silent success"
+check "malformed completion returns no candidates" test ! -s "$TMP/out"
+check "malformed completion leaks no metadata sentinel" not_contains "$TMP/err" SECRET_LIST_METADATA_SENTINEL
+for completion_case in list_empty_component list_duplicate list_duplicate_id multi_list; do
+  RBW_CASE=$completion_case run_complete "$TMP/out" "$TMP/err" 'env/' || fail "$completion_case completion should be silent success"
+  check "$completion_case completion returns no candidates" test ! -s "$TMP/out"
+  check "$completion_case completion returns no errors" test ! -s "$TMP/err"
+done
+RBW_ENV_INTERNAL_COMPLETE=1 PATH="$TMP/no-jq" /bin/bash "$ROOT/rbw-env" __complete-show env/ >"$TMP/out" 2>"$TMP/err" || fail "missing jq completion should be silent success"
+check "missing jq completion returns no output" test ! -s "$TMP/out"
+RBW_ENV_INTERNAL_COMPLETE=1 PATH="$TMP/with-deps" /bin/bash "$ROOT/rbw-env" __complete-show env/ >"$TMP/out" 2>"$TMP/err" || fail "missing rbw completion should be silent success"
+check "missing rbw completion returns no output" test ! -s "$TMP/out"
+: >"$RBW_LOG"
+if run_complete "$TMP/out" "$TMP/err"; then fail "completion missing prefix accepted"; fi
+check "completion requires exactly one prefix" test ! -s "$TMP/out"
+if run_complete "$TMP/out" "$TMP/err" env/ extra; then fail "completion extra argument accepted"; fi
+check "completion rejects extra arguments before rbw" count_prefix_log "$RBW_LOG" '' 0
+
+cat >"$TMP/zsh-completion-test.zsh" <<'ZSH'
+source "$ROOT/_rbw-env"
+_describe() {
+  local array_name=$4
+  local -a values=("${(@P)array_name}")
+  print -rl -- "${values[@]%%:*}"
+}
+compadd() {
+  while (( $# )) && [[ $1 != -- ]]; do shift; done
+  (( $# )) && shift
+  print -rl -- "$@"
+}
+words=(${(Q)${(z)LINE}})
+[[ $LINE == *' ' ]] && words+=("")
+CURRENT=${#words}
+_rbw-env
+ZSH
+RBW_CASE=completion LINE='rbw-env show env/team\ space/' PATH="$TMP/bin" ROOT="$ROOT" /bin/zsh -f "$TMP/zsh-completion-test.zsh" >"$TMP/out" 2>"$TMP/err" || fail "zsh selector completion"
+check "zsh completion passes candidates with spaces and special characters intact" equals "$TMP/out" $'env/team space/deep:slash\\back/\nenv/team space/CHILD'
+RBW_CASE=completion LINE='rbw-env show env/ extra' PATH="$TMP/bin" ROOT="$ROOT" /bin/zsh -f "$TMP/zsh-completion-test.zsh" >"$TMP/out" 2>"$TMP/err" || fail "zsh argument scope"
+check "zsh completion only completes the show selector argument" test ! -s "$TMP/out"
+LINE='rbw-env ' PATH="$TMP/bin" ROOT="$ROOT" /bin/zsh -f "$TMP/zsh-completion-test.zsh" >"$TMP/out" 2>"$TMP/err" || fail "zsh top-level completion"
+check "zsh completion exposes only minimal top-level commands" equals "$TMP/out" $'list\nshow\n--folder'
+
 RBW_CASE=reserved_list run "$TMP/out" "$TMP/err" --folder list || fail "reserved list folder escape"
 check "reserved list folder remains available explicitly" equals "$TMP/out" "API_TOKEN='fake-value'"
 RBW_CASE=reserved_show run "$TMP/out" "$TMP/err" --folder show -- show-env || fail "reserved show folder escape"
 check "reserved show folder preserves command mode" equals "$TMP/out" $'TOKEN=fake-value\nargc=0'
+RBW_CASE=reserved_internal run "$TMP/out" "$TMP/err" __complete-show || fail "internal command folder compatibility"
+check "internal command spelling remains available as a normal folder" equals "$TMP/out" "API_TOKEN='fake-value'"
 
 for folder_case in folder_multi_list folder_multi_detail; do
   if RBW_CASE=$folder_case run "$TMP/out" "$TMP/err" target; then fail "$folder_case accepted in folder output mode"; fi
@@ -335,31 +413,68 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.3.0" contains "$RBW_CURL_LOG" '/v0.3.0/rbw-env'
+check "installer ignores mutable ref override and uses v0.4.0" contains "$RBW_CURL_LOG" '/v0.4.0/rbw-env'
+check "installer downloads immutable v0.4.0 completion" contains "$RBW_CURL_LOG" '/v0.4.0/_rbw-env'
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
+check "installer writes exact checked completion bytes" equals "$TMP/completions/_rbw-env" "$(cat "$ROOT/_rbw-env")"
+rbw_hash=$(shasum -a 256 "$ROOT/rbw-env"); rbw_hash=${rbw_hash%% *}
+completion_hash=$(shasum -a 256 "$ROOT/_rbw-env"); completion_hash=${completion_hash%% *}
+check "installer embeds exact rbw-env checksum" contains "$ROOT/install.sh" "expected=$rbw_hash"
+check "installer embeds exact completion checksum" contains "$ROOT/install.sh" "completion_expected=$completion_hash"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"
+cp "$TMP/completions/_rbw-env" "$TMP/completion-before-failure"
+export RBW_TEST_COMPLETION_DEST="$TMP/completions/_rbw-env"
 if RBW_CURL_CASE=corrupt run_install; then fail "checksum mismatch accepted"; fi
 check "checksum mismatch preserves installed helper" equals "$TMP/install/rbw-env" "$(cat "$TMP/installed-before-failure")"
+check "helper checksum mismatch preserves installed completion" equals "$TMP/completions/_rbw-env" "$(cat "$TMP/completion-before-failure")"
 check "checksum failure does not leak downloaded bytes" not_contains "$TMP/err" SECRET_CORRUPT_DOWNLOAD
+if RBW_CURL_CASE=corrupt_completion run_install; then fail "completion checksum mismatch accepted"; fi
+check "completion checksum mismatch preserves installed helper" equals "$TMP/install/rbw-env" "$(cat "$TMP/installed-before-failure")"
+check "completion checksum mismatch preserves installed completion" equals "$TMP/completions/_rbw-env" "$(cat "$TMP/completion-before-failure")"
+check "completion checksum failure does not leak downloaded bytes" not_contains "$TMP/err" SECRET_CORRUPT_COMPLETION_DOWNLOAD
+printf '%s\n' PREVIOUS_HELPER >"$TMP/install/rbw-env"
+printf '%s\n' PREVIOUS_COMPLETION >"$TMP/completions/_rbw-env"
+if RBW_MV_CASE=completion_fail run_install; then fail "completion replacement failure accepted"; fi
+check "completion replacement failure rolls back helper" equals "$TMP/install/rbw-env" PREVIOUS_HELPER
+check "completion replacement failure preserves completion" equals "$TMP/completions/_rbw-env" PREVIOUS_COMPLETION
 : >"$RBW_CURL_LOG"
 run_install || fail "safe staging install"
 staging=''
+completion_staging=''
 staging_umask=''
+completion_staging_umask=''
 line_number=0
 while IFS= read -r line; do
   line_number=$((line_number + 1))
   [ "$line_number" -eq 2 ] && staging=$line
   [ "$line_number" -eq 3 ] && staging_umask=$line
+  [ "$line_number" -eq 5 ] && completion_staging=$line
+  [ "$line_number" -eq 6 ] && completion_staging_umask=$line
 done <"$RBW_CURL_LOG"
 case $staging in "$TMP/install/.rbw-env."??????) :;; *) fail "installer staging is not mktemp-generated in install directory";; esac
+case $completion_staging in "$TMP/completions/._rbw-env."??????) :;; *) fail "completion staging is not mktemp-generated in completion directory";; esac
 check "installer uses private staging umask" test "$staging_umask" = 0077
+check "completion installer uses private staging umask" test "$completion_staging_umask" = 0077
+check "installed helper mode is executable" test "$(stat -f %Lp "$TMP/install/rbw-env")" = 755
+check "installed completion mode is read-only to group and other" test "$(stat -f %Lp "$TMP/completions/_rbw-env")" = 644
 if RBW_CURL_CASE=symlink run_install; then fail "symlink download accepted"; fi
 check "non-regular download preserves installed helper" equals "$TMP/install/rbw-env" "$(cat "$TMP/installed-before-failure")"
 check "temporary staging files are cleaned" test ! -e "$staging"
+check "completion staging files are cleaned" test ! -e "$completion_staging"
+if RBW_CURL_CASE=symlink_completion run_install; then fail "completion symlink download accepted"; fi
+check "non-regular completion preserves installed helper" equals "$TMP/install/rbw-env" "$(cat "$TMP/installed-before-failure")"
+check "non-regular completion preserves installed completion" equals "$TMP/completions/_rbw-env" "$(cat "$TMP/completion-before-failure")"
+/bin/mv "$TMP/completions/_rbw-env" "$TMP/completion-before-directory"
+mkdir "$TMP/completions/_rbw-env"
+if run_install; then fail "completion directory destination accepted"; fi
+check "completion directory destination fails generically" contains "$TMP/err" 'completion destination is not a regular file'
+rmdir "$TMP/completions/_rbw-env"
+/bin/mv "$TMP/completion-before-directory" "$TMP/completions/_rbw-env"
 if RBW_CONFIG_PINENTRY=/missing/SECRET_INSTALLER_PINENTRY run_install; then
   fail "installer accepted unusable configured pinentry via unrelated PATH candidate"
 fi
 check "installer rejects configured pinentry mismatch" contains "$TMP/err" 'configured rbw pinentry is unusable'
 check "installer pinentry error is value-free" not_contains "$TMP/err" SECRET_INSTALLER_PINENTRY
+check "installer never edits zsh profile" equals "$TMP/home/.zshrc" PROFILE_SENTINEL
 
 printf '1..%s\n' "$pass"

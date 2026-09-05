@@ -26,6 +26,16 @@ case $1 in
     [ -n "$folder" ] && [[ $key =~ ^[A-Z_][A-Z0-9_]*$ ]] || fail 'invalid selector'
     mode=show
     ;;
+  __complete-show)
+    if [ "${RBW_ENV_INTERNAL_COMPLETE:-}" = 1 ]; then
+      [ "$#" -eq 2 ] || fail '__complete-show requires exactly one prefix'
+      prefix=$2
+      mode=complete
+    else
+      folder=$1
+      shift
+    fi
+    ;;
   *)
     folder=$1
     shift
@@ -43,6 +53,73 @@ if [ "$mode" = folder ] && [ "$#" -gt 0 ]; then
   shift
   [ "$#" -gt 0 ] || fail 'command required after --'
   run_command=true
+fi
+
+# shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+metadata_projection='
+  def render($nodes; $parent; $indent):
+    [$nodes[] | select(
+      (.path | length) == (($parent | length) + 1) and
+      .path[0:($parent | length)] == $parent
+    )] | sort_by(.path[-1], (if .folder then 0 else 1 end)) as $children |
+    $children | to_entries[] |
+    . as $entry |
+    ($entry.key == (($children | length) - 1)) as $last |
+    $entry.value as $child |
+    ($indent + (if $last then "`-- " else "|-- " end) + $child.path[-1] +
+      (if $child.folder then "/" else "" end)),
+    (if $child.folder then
+      render($nodes; $child.path; $indent + (if $last then "    " else "|   " end))
+    else empty end);
+  if length != 1 then error("multiple documents") else .[0] |
+    if type != "array" or any(.[];
+        type != "object" or
+        (.id | type != "string" or length == 0) or
+        (.name | type != "string" or length == 0) or
+        (.folder | type != "string" and type != "null") or
+        (.type | type != "string" or length == 0) or
+        ((.id + .name + (.folder // "")) | test("[\\x00\\t\\r\\n]")))
+    then error("malformed list")
+    elif ([.[] | .id] | group_by(.) | any(length > 1))
+    then error("duplicate id")
+    else [.[] | select(
+      .type == "Note" and
+      (.folder | type) == "string" and
+      (.folder | length) > 0 and
+      (.name | test("^[A-Z_][A-Z0-9_]*$"))) |
+      (.folder | split("/")) as $folder |
+      if any($folder[]; length == 0) then error("empty component")
+      else {id, folder, name, path: ($folder + [.name])} end] as $items |
+      if ([$items[].path] | group_by(.) | any(length > 1))
+      then error("duplicate selector")
+      else $items end
+    end
+  end'
+
+if [ "$mode" = complete ]; then
+  rbw=$(command -v rbw 2>/dev/null) || exit 0
+  jq=$(command -v jq 2>/dev/null) || exit 0
+  "$rbw" unlocked >/dev/null 2>&1 || exit 0
+  list_json=$("$rbw" list --raw 2>/dev/null) || exit 0
+  # Internal completion surface: validated metadata paths only; never item details or unlock.
+  # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+  printf '%s' "$list_json" | "$jq" -ser --arg prefix "$prefix" "$metadata_projection"'
+    | reduce .[] as $item ([];
+        . + [range(1; ($item.path | length)) as $depth |
+          {candidate: (($item.path[0:$depth] | join("/")) + "/"), folder: true}]
+        + [{candidate: ($item.path | join("/")), folder: false}]
+      )
+    | unique_by([.candidate, .folder])
+    | map(select(.candidate | startswith($prefix)))
+    | map(. + {rest: (.candidate | ltrimstr($prefix))})
+    | map(select(
+        (.rest == "" and (.folder | not)) or
+        (.rest != "" and ((.rest | rtrimstr("/")) | contains("/") | not))
+      ))
+    | sort_by(.candidate, .folder)
+    | .[].candidate
+  ' 2>/dev/null || :
+  exit 0
 fi
 
 command -v rbw >/dev/null 2>&1 || fail 'required command not found: rbw'
@@ -79,51 +156,13 @@ if ! list_json=$("$rbw" list --raw 2>/dev/null); then
 fi
 if [ "$mode" = list ]; then
   # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
-  if ! tree=$(printf '%s' "$list_json" | "$jq" -ser '
-    def render($nodes; $parent; $indent):
-      [$nodes[] | select(
-        (.path | length) == (($parent | length) + 1) and
-        .path[0:($parent | length)] == $parent
-      )] | sort_by(.path[-1], (if .folder then 0 else 1 end)) as $children |
-      $children | to_entries[] |
-      . as $entry |
-      ($entry.key == (($children | length) - 1)) as $last |
-      $entry.value as $child |
-      ($indent + (if $last then "`-- " else "|-- " end) + $child.path[-1] +
-        (if $child.folder then "/" else "" end)),
-      (if $child.folder then
-        render($nodes; $child.path; $indent + (if $last then "    " else "|   " end))
-      else empty end);
-    if length != 1 then error("multiple documents") else .[0] |
-      if type != "array" or any(.[];
-          type != "object" or
-          (.id | type != "string" or length == 0) or
-          (.name | type != "string" or length == 0) or
-          (.folder | type != "string" and type != "null") or
-          (.type | type != "string" or length == 0) or
-          ((.id + .name + (.folder // "")) | test("[\\x00\\t\\r\\n]")))
-      then error("malformed list")
-      elif ([.[] | .id] | group_by(.) | any(length > 1))
-      then error("duplicate id")
-      else [.[] | select(
-        .type == "Note" and
-        (.folder | type) == "string" and
-        (.folder | length) > 0 and
-        (.name | test("^[A-Z_][A-Z0-9_]*$"))) |
-        (.folder | split("/")) as $folder |
-        if any($folder[]; length == 0) then error("empty component")
-        else $folder + [.name] end] as $paths |
-        if ($paths | group_by(.) | any(length > 1))
-        then error("duplicate selector")
-        else reduce $paths[] as $path ([];
-          . + [range(1; $path | length) as $depth |
-            {path: $path[0:$depth], folder: true}]
-          + [{path: $path, folder: false}]
-        ) | unique_by([.path, .folder]) as $nodes |
-          ".", render($nodes; []; "")
-        end
-      end
-    end
+  if ! tree=$(printf '%s' "$list_json" | "$jq" -ser "$metadata_projection"'
+    | reduce .[] as $item ([];
+      . + [range(1; ($item.path | length)) as $depth |
+        {path: $item.path[0:$depth], folder: true}]
+      + [{path: $item.path, folder: false}]
+    ) | unique_by([.path, .folder]) as $nodes |
+      ".", render($nodes; []; "")
   ' 2>/dev/null); then
     fail 'list results are malformed or ambiguous'
   fi
@@ -132,22 +171,9 @@ if [ "$mode" = list ]; then
 fi
 if [ "$mode" = show ]; then
   # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
-  if ! id=$(printf '%s' "$list_json" | "$jq" -ser --arg folder "$folder" --arg name "$key" '
-    if length != 1 then error("multiple documents") else .[0] |
-      if type != "array" or any(.[];
-          type != "object" or
-          (.id | type != "string" or length == 0) or
-          (.name | type != "string" or length == 0) or
-          (.folder | type != "string" and type != "null") or
-          (.type | type != "string" or length == 0) or
-          ((.id + .name + (.folder // "")) | test("[\\x00\\t\\r\\n]")))
-      then error("malformed list")
-      elif ([.[] | .id] | group_by(.) | any(length > 1))
-      then error("duplicate id")
-      else [.[] | select(.folder == $folder and .name == $name and .type == "Note")] as $matches |
-        if ($matches | length) != 1 then error("missing or ambiguous") else $matches[0].id end
-      end
-    end
+  if ! id=$(printf '%s' "$list_json" | "$jq" -ser --arg folder "$folder" --arg name "$key" "$metadata_projection"'
+    | [.[] | select(.folder == $folder and .name == $name)] as $matches |
+    if ($matches | length) != 1 then error("missing or ambiguous") else $matches[0].id end
   ' 2>/dev/null); then
     fail 'Secure Note is missing, malformed, or ambiguous'
   fi
