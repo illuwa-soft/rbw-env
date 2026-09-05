@@ -2,9 +2,12 @@
 set -eu
 
 fail() { printf 'rbw-env installer: %s\n' "$1" >&2; exit 1; }
-for dependency in curl rbw jq mktemp; do
+for dependency in curl rbw; do
   command -v "$dependency" >/dev/null 2>&1 || fail "required command not found: $dependency"
 done
+# shellcheck disable=SC2016 # Backticks are literal installation guidance.
+command -v jq >/dev/null 2>&1 || fail 'required command not found: jq; install jq with your system package manager (for example, `brew install jq` on macOS), then retry'
+command -v mktemp >/dev/null 2>&1 || fail 'required command not found: mktemp'
 
 rbw=$(command -v rbw)
 jq=$(command -v jq)
