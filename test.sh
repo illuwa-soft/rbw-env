@@ -22,7 +22,7 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.2.0/rbw-env' ] || exit 22
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/rbw-env' ] || exit 22
 case "${RBW_CURL_CASE:-ok}" in
   corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
   symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
@@ -33,7 +33,7 @@ cat >"$TMP/bin/sha256sum" <<'SH'
 #!/bin/bash
 [ "$#" -eq 1 ] || exit 2
 if cmp -s "$1" "$RBW_DOWNLOAD_SOURCE"; then
-  printf '0fcf997b749ee7a637356eb8c50bff7825c1a8a9ce504aa3246cdaa08a070495  %s\n' "$1"
+  printf '64d73d8b9e8e584643432c4c43940cd08ce5af34a091239e8e3da3c4783da47f  %s\n' "$1"
 else
   printf 'mismatch  %s\n' "$1"
 fi
@@ -335,7 +335,7 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.2.0" contains "$RBW_CURL_LOG" '/v0.2.0/rbw-env'
+check "installer ignores mutable ref override and uses v0.3.0" contains "$RBW_CURL_LOG" '/v0.3.0/rbw-env'
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"
 if RBW_CURL_CASE=corrupt run_install; then fail "checksum mismatch accepted"; fi
