@@ -44,12 +44,28 @@ API_TOKEN="$(rbw-env show hermes/production/API_TOKEN)"
 
 ### Zsh completion
 
-Add the installed completion directory to `fpath`, then initialize zsh completion:
+The normal installer command above installs both `rbw-env` and its zsh completion. You do not need to uninstall an older version first. Add the default completion directory to `fpath`, then initialize zsh completion:
 
 ```zsh
 fpath=("${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions" $fpath)
 autoload -Uz compinit && compinit
 ```
+
+Start a new shell after the first installation. If zsh still uses a stale completion cache, rebuild it once:
+
+```zsh
+rm -f ~/.zcompdump*
+exec zsh
+```
+
+If you use Oh My Zsh and do not want to add the default directory to `fpath`, install the completion directly into its existing custom completion directory instead:
+
+```zsh
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/install.sh |
+RBW_ENV_ZSH_COMPLETION_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/completions" bash
+```
+
+This alternate command is only for completion-path troubleshooting; it is not required when the normal installation already completes `rbw-env show <prefix><TAB>` successfully.
 
 `rbw-env show env/<TAB>` then completes validated metadata paths incrementally. The vault must already be unlocked; completion never prompts or unlocks it.
 
