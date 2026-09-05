@@ -2,9 +2,12 @@
 set -eu
 
 fail() { printf 'rbw-env installer: %s\n' "$1" >&2; exit 1; }
-for dependency in curl rbw jq mktemp; do
+for dependency in curl rbw; do
   command -v "$dependency" >/dev/null 2>&1 || fail "required command not found: $dependency"
 done
+# shellcheck disable=SC2016 # Backticks are literal installation guidance.
+command -v jq >/dev/null 2>&1 || fail 'required command not found: jq; install jq with your system package manager (for example, `brew install jq` on macOS), then retry'
+command -v mktemp >/dev/null 2>&1 || fail 'required command not found: mktemp'
 
 rbw=$(command -v rbw)
 jq=$(command -v jq)
@@ -30,11 +33,11 @@ umask 077
 mkdir -p "$install_dir"
 pending=$(mktemp "$install_dir/.rbw-env.XXXXXX") || fail 'could not create installer staging file'
 trap 'rm -f "$pending"' EXIT HUP INT TERM
-if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.2.0/rbw-env" -o "$pending"; then
+if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/rbw-env" -o "$pending"; then
   fail 'download failed'
 fi
 [ -f "$pending" ] && [ ! -L "$pending" ] || fail 'download is not a regular file'
-expected=0fcf997b749ee7a637356eb8c50bff7825c1a8a9ce504aa3246cdaa08a070495
+expected=64d73d8b9e8e584643432c4c43940cd08ce5af34a091239e8e3da3c4783da47f
 if command -v sha256sum >/dev/null 2>&1; then
   checksum=$(sha256sum "$pending") || fail 'checksum calculation failed'
 elif command -v shasum >/dev/null 2>&1; then

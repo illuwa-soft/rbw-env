@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/install.sh | bash
 ```
 
-Installs the fixed `v0.2.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
+Installs the fixed `v0.3.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. Install `jq` separately with your system package manager (for example, `brew install jq` on macOS); the installer never installs packages. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -22,10 +22,15 @@ Only items whose folder name exactly matches the argument are used. Child folder
 
 ## Usage
 
-List usable Secure Note selectors without fetching secret values:
+List usable Secure Note names and paths without fetching or printing secret values:
 
 ```bash
 rbw-env list
+.
+`-- hermes/
+    `-- production/
+        |-- API_TOKEN
+        `-- DATABASE_URL
 ```
 
 Read one value by selector:

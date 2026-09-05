@@ -45,9 +45,9 @@ if [ "$mode" = folder ] && [ "$#" -gt 0 ]; then
   run_command=true
 fi
 
-for dependency in rbw jq; do
-  command -v "$dependency" >/dev/null 2>&1 || fail "required command not found: $dependency"
-done
+command -v rbw >/dev/null 2>&1 || fail 'required command not found: rbw'
+# shellcheck disable=SC2016 # Backticks are literal installation guidance.
+command -v jq >/dev/null 2>&1 || fail 'required command not found: jq; install jq with your system package manager (for example, `brew install jq` on macOS), then retry'
 rbw=$(command -v rbw)
 jq=$(command -v jq)
 
@@ -79,7 +79,21 @@ if ! list_json=$("$rbw" list --raw 2>/dev/null); then
 fi
 if [ "$mode" = list ]; then
   # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
-  if ! selectors=$(printf '%s' "$list_json" | "$jq" -cser '
+  if ! tree=$(printf '%s' "$list_json" | "$jq" -ser '
+    def render($nodes; $parent; $indent):
+      [$nodes[] | select(
+        (.path | length) == (($parent | length) + 1) and
+        .path[0:($parent | length)] == $parent
+      )] | sort_by(.path[-1], (if .folder then 0 else 1 end)) as $children |
+      $children | to_entries[] |
+      . as $entry |
+      ($entry.key == (($children | length) - 1)) as $last |
+      $entry.value as $child |
+      ($indent + (if $last then "`-- " else "|-- " end) + $child.path[-1] +
+        (if $child.folder then "/" else "" end)),
+      (if $child.folder then
+        render($nodes; $child.path; $indent + (if $last then "    " else "|   " end))
+      else empty end);
     if length != 1 then error("multiple documents") else .[0] |
       if type != "array" or any(.[];
           type != "object" or
@@ -96,16 +110,24 @@ if [ "$mode" = list ]; then
         (.folder | type) == "string" and
         (.folder | length) > 0 and
         (.name | test("^[A-Z_][A-Z0-9_]*$"))) |
-        (.folder + "/" + .name)] as $selectors |
-        if ($selectors | group_by(.) | any(length > 1))
+        (.folder | split("/")) as $folder |
+        if any($folder[]; length == 0) then error("empty component")
+        else $folder + [.name] end] as $paths |
+        if ($paths | group_by(.) | any(length > 1))
         then error("duplicate selector")
-        else ($selectors | sort) end
+        else reduce $paths[] as $path ([];
+          . + [range(1; $path | length) as $depth |
+            {path: $path[0:$depth], folder: true}]
+          + [{path: $path, folder: false}]
+        ) | unique_by([.path, .folder]) as $nodes |
+          ".", render($nodes; []; "")
+        end
       end
     end
   ' 2>/dev/null); then
     fail 'list results are malformed or ambiguous'
   fi
-  printf '%s' "$selectors" | "$jq" -r '.[]'
+  printf '%s\n' "$tree"
   exit 0
 fi
 if [ "$mode" = show ]; then

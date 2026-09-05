@@ -4,11 +4,11 @@ set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 TMP=${TMPDIR:-/tmp}/rbw-env-test.$$
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-pinentry" "$TMP/with-deps" "$TMP/home" "$TMP/install"
+mkdir -p "$TMP/bin" "$TMP/no-jq" "$TMP/no-jq-install" "$TMP/no-pinentry" "$TMP/with-deps" "$TMP/home" "$TMP/install"
 mkdir -p "$TMP/home/.local/bin"
 REAL_JQ=$(command -v jq)
 PYTHON3=$(command -v python3)
-export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_CURL_LOG="$TMP/curl.log"
+export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
 
 cat >"$TMP/bin/jq" <<'SH'
 #!/bin/bash
@@ -22,7 +22,7 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.2.0/rbw-env' ] || exit 22
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.3.0/rbw-env' ] || exit 22
 case "${RBW_CURL_CASE:-ok}" in
   corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
   symlink) rm -f "$4"; ln -s "$RBW_DOWNLOAD_SOURCE" "$4" ;;
@@ -33,7 +33,7 @@ cat >"$TMP/bin/sha256sum" <<'SH'
 #!/bin/bash
 [ "$#" -eq 1 ] || exit 2
 if cmp -s "$1" "$RBW_DOWNLOAD_SOURCE"; then
-  printf '0fcf997b749ee7a637356eb8c50bff7825c1a8a9ce504aa3246cdaa08a070495  %s\n' "$1"
+  printf '64d73d8b9e8e584643432c4c43940cd08ce5af34a091239e8e3da3c4783da47f  %s\n' "$1"
 else
   printf 'mismatch  %s\n' "$1"
 fi
@@ -88,7 +88,8 @@ case "$1" in
   list)
     case "${RBW_CASE:-ok}" in
       malformed) printf '%s\n' 'not-json' ;;
-      list_ok) printf '%s\n' '[{"id":"7","name":"Z_KEY","folder":"team/prod","type":"Note"},{"id":"8","name":"ignored-name","folder":"team/prod","type":"Note"},{"id":"9","name":"A_KEY","folder":"alpha","type":"Note"},{"id":"10","name":"LOGIN","folder":"team/prod","type":"Login"},{"id":"11","name":"NULL_FOLDER","folder":null,"type":"Note"}]' ;;
+      list_ok) printf '%s\n' '[{"id":"7","name":"Z_KEY","folder":"team/PROD","type":"Note"},{"id":"8","name":"ignored-name","folder":"team/PROD","type":"Note"},{"id":"9","name":"A_KEY","folder":"alpha","type":"Note"},{"id":"10","name":"LOGIN","folder":"team/PROD","type":"Login"},{"id":"11","name":"NULL_FOLDER","folder":null,"type":"Note"},{"id":"12","name":"PROD","folder":"team","type":"Note"},{"id":"13","name":"ROOT","folder":"zeta","type":"Note"}]' ;;
+      list_empty_component) printf '%s\n' '[{"id":"14","name":"ONE","folder":"/team","type":"Note"},{"id":"15","name":"TWO","folder":"team/","type":"Note"},{"id":"16","name":"THREE","folder":"team//prod","type":"Note"}]' ;;
       list_duplicate) printf '%s\n' '[{"id":"12","name":"API_TOKEN","folder":"team/prod","type":"Note"},{"id":"13","name":"API_TOKEN","folder":"team/prod","type":"Note"}]' ;;
       list_duplicate_id) printf '%s\n' '[{"id":"12","name":"API_TOKEN","folder":"team/prod","type":"Note"},{"id":"12","name":"OTHER_KEY","folder":"other","type":"Note"}]' ;;
       list_malformed) printf '%s\n' '[{"id":"14","name":"SECRET_LIST_METADATA_SENTINEL","folder":"team/prod"}]' ;;
@@ -147,6 +148,15 @@ esac
 SH
 chmod +x "$TMP/bin/"*
 cp "$TMP/bin/rbw" "$TMP/no-jq/rbw"
+cp "$TMP/bin/rbw" "$TMP/bin/curl" "$TMP/no-jq-install/"
+for command in brew apt-get apt yum dnf pacman sudo; do
+  cat >"$TMP/no-jq-install/$command" <<'SH'
+#!/bin/bash
+printf '%s\n' "$0 $*" >>"$PACKAGE_LOG"
+exit 99
+SH
+done
+chmod +x "$TMP/no-jq-install/"*
 cp "$TMP/bin/rbw" "$TMP/no-pinentry/rbw"
 cp "$TMP/bin/jq" "$TMP/no-pinentry/jq"
 cp "$TMP/bin/jq" "$TMP/with-deps/jq"
@@ -173,8 +183,12 @@ check "rbw list is raw and unscoped for exact local filtering" contains "$RBW_LO
 
 : >"$RBW_LOG"
 RBW_CASE=list_ok run "$TMP/out" "$TMP/err" list || fail "list selectors"
-check "list prints only sorted usable selectors" equals "$TMP/out" $'alpha/A_KEY\nteam/prod/Z_KEY'
+check "list prints a deterministic ASCII tree with a path/leaf collision" equals "$TMP/out" $'.\n|-- alpha/\n|   `-- A_KEY\n|-- team/\n|   |-- PROD/\n|   |   `-- Z_KEY\n|   `-- PROD\n`-- zeta/\n    `-- ROOT'
 check "list never fetches item details" count_prefix_log "$RBW_LOG" 'get ' 0
+if RBW_CASE=list_empty_component run "$TMP/out" "$TMP/err" list; then fail "empty slash-separated component accepted"; fi
+check "empty slash-separated components fail generically" equals "$TMP/err" 'rbw-env: list results are malformed or ambiguous'
+check "empty slash-separated components emit no stdout" test ! -s "$TMP/out"
+check "empty slash-separated components never fetch details" count_prefix_log "$RBW_LOG" 'get ' 0
 if RBW_CASE=list_duplicate run "$TMP/out" "$TMP/err" list; then fail "duplicate list selector accepted"; fi
 check "duplicate list selector fails with a generic error" equals "$TMP/err" 'rbw-env: list results are malformed or ambiguous'
 check "duplicate list selector emits no stdout" test ! -s "$TMP/out"
@@ -260,7 +274,13 @@ inline_expected="TOKEN=$inline_value"$'\nargc=0'
 check "inline exec preserves exact raw first-line value" equals "$TMP/out" "$inline_expected"
 
 if PATH="$TMP/no-jq" /bin/bash "$ROOT/rbw-env" target >"$TMP/out" 2>"$TMP/err"; then fail "missing jq accepted"; fi
-check "missing dependency is rejected" contains "$TMP/err" 'required command not found: jq'
+check "runtime missing jq gives actionable install-and-retry guidance" contains "$TMP/err" 'install jq with your system package manager'
+check "runtime missing jq guidance names a macOS command" contains "$TMP/err" 'brew install jq'
+: >"$PACKAGE_LOG"
+if PATH="$TMP/no-jq-install" HOME="$TMP/home" RBW_ENV_INSTALL_DIR="$TMP/install" /bin/bash "$ROOT/install.sh" >"$TMP/out" 2>"$TMP/err"; then fail "installer missing jq accepted"; fi
+check "installer missing jq gives actionable install-and-retry guidance" contains "$TMP/err" 'install jq with your system package manager'
+check "installer missing jq guidance names a macOS command" contains "$TMP/err" 'brew install jq'
+check "missing jq never invokes a package manager or sudo" test ! -s "$PACKAGE_LOG"
 rm "$TMP/no-jq/rbw"
 if PATH="$TMP/no-jq" /bin/bash "$ROOT/rbw-env" target >"$TMP/out" 2>"$TMP/err"; then fail "missing rbw accepted"; fi
 check "missing rbw is rejected" contains "$TMP/err" 'required command not found: rbw'
@@ -315,7 +335,7 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.2.0" contains "$RBW_CURL_LOG" '/v0.2.0/rbw-env'
+check "installer ignores mutable ref override and uses v0.3.0" contains "$RBW_CURL_LOG" '/v0.3.0/rbw-env'
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"
 if RBW_CURL_CASE=corrupt run_install; then fail "checksum mismatch accepted"; fi
