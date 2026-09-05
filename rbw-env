@@ -3,17 +3,42 @@ set -euo pipefail
 
 fail() { printf 'rbw-env: %s\n' "$1" >&2; exit 1; }
 
-[ "$#" -ge 1 ] || fail 'usage: rbw-env <exact-folder> [-- <command> [args...]]'
-folder=$1
-shift
-[ -n "$folder" ] || fail 'folder must not be empty'
+[ "$#" -ge 1 ] || fail 'usage: rbw-env [--folder] <exact-folder> [-- <command> [args...]] | rbw-env list | rbw-env show <folder>/<KEY>'
+mode=folder
+case $1 in
+  --folder)
+    [ "$#" -ge 2 ] || fail 'folder required after --folder'
+    folder=$2
+    shift 2
+    [ -n "$folder" ] || fail 'folder must not be empty'
+    ;;
+  list)
+    [ "$#" -eq 1 ] || fail 'list takes no arguments'
+    mode=list
+    ;;
+  show)
+    [ "$#" -eq 2 ] || fail 'show requires exactly one selector'
+    selector=$2
+    case $selector in
+      */*) folder=${selector%/*}; key=${selector##*/} ;;
+      *) fail 'invalid selector' ;;
+    esac
+    [ -n "$folder" ] && [[ $key =~ ^[A-Z_][A-Z0-9_]*$ ]] || fail 'invalid selector'
+    mode=show
+    ;;
+  *)
+    folder=$1
+    shift
+    [ -n "$folder" ] || fail 'folder must not be empty'
+    ;;
+esac
 
 if [ -n "${HOME:-}" ]; then
   PATH=${PATH:+$PATH:}$HOME/.cargo/bin:$HOME/.local/bin
 fi
 
 run_command=false
-if [ "$#" -gt 0 ]; then
+if [ "$mode" = folder ] && [ "$#" -gt 0 ]; then
   [ "$1" = -- ] || fail 'unexpected arguments (use -- before a command)'
   shift
   [ "$#" -gt 0 ] || fail 'command required after --'
@@ -52,24 +77,94 @@ fi
 if ! list_json=$("$rbw" list --raw 2>/dev/null); then
   fail 'could not enumerate rbw entries'
 fi
+if [ "$mode" = list ]; then
+  # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+  if ! selectors=$(printf '%s' "$list_json" | "$jq" -cser '
+    if length != 1 then error("multiple documents") else .[0] |
+      if type != "array" or any(.[];
+          type != "object" or
+          (.id | type != "string" or length == 0) or
+          (.name | type != "string" or length == 0) or
+          (.folder | type != "string" and type != "null") or
+          (.type | type != "string" or length == 0) or
+          ((.id + .name + (.folder // "")) | test("[\\x00\\t\\r\\n]")))
+      then error("malformed list")
+      elif ([.[] | .id] | group_by(.) | any(length > 1))
+      then error("duplicate id")
+      else [.[] | select(
+        .type == "Note" and
+        (.folder | type) == "string" and
+        (.folder | length) > 0 and
+        (.name | test("^[A-Z_][A-Z0-9_]*$"))) |
+        (.folder + "/" + .name)] as $selectors |
+        if ($selectors | group_by(.) | any(length > 1))
+        then error("duplicate selector")
+        else ($selectors | sort) end
+      end
+    end
+  ' 2>/dev/null); then
+    fail 'list results are malformed or ambiguous'
+  fi
+  printf '%s' "$selectors" | "$jq" -r '.[]'
+  exit 0
+fi
+if [ "$mode" = show ]; then
+  # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+  if ! id=$(printf '%s' "$list_json" | "$jq" -ser --arg folder "$folder" --arg name "$key" '
+    if length != 1 then error("multiple documents") else .[0] |
+      if type != "array" or any(.[];
+          type != "object" or
+          (.id | type != "string" or length == 0) or
+          (.name | type != "string" or length == 0) or
+          (.folder | type != "string" and type != "null") or
+          (.type | type != "string" or length == 0) or
+          ((.id + .name + (.folder // "")) | test("[\\x00\\t\\r\\n]")))
+      then error("malformed list")
+      elif ([.[] | .id] | group_by(.) | any(length > 1))
+      then error("duplicate id")
+      else [.[] | select(.folder == $folder and .name == $name and .type == "Note")] as $matches |
+        if ($matches | length) != 1 then error("missing or ambiguous") else $matches[0].id end
+      end
+    end
+  ' 2>/dev/null); then
+    fail 'Secure Note is missing, malformed, or ambiguous'
+  fi
+  # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
+  if ! value=$("$rbw" get "$id" --raw 2>/dev/null | "$jq" -ser \
+      --arg id "$id" --arg folder "$folder" --arg name "$key" '
+        if length != 1 then error("multiple documents") else .[0] |
+          select(type == "object" and .id == $id and .folder == $folder and .name == $name and
+            has("data") and .data == null and (.notes | type) == "string") |
+          (.notes | split("\n")[0] | rtrimstr("\r")) as $value |
+          select(($value | length) > 0 and ($value | contains("\u0000") | not)) |
+          $value
+        end
+      ' 2>/dev/null); then
+    fail 'Secure Note is missing, malformed, or has an empty first line'
+  fi
+  printf '%s\n' "$value"
+  exit 0
+fi
 # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
-if ! entries=$(printf '%s' "$list_json" | "$jq" -er --arg folder "$folder" '
-  if type != "array" or any(.[];
-      type != "object" or
-      (.id | type != "string" or length == 0) or
-      (.name | type != "string" or length == 0) or
-      (.folder | type != "string" and type != "null") or
-      (.type | type != "string" or length == 0))
-  then error("malformed list")
-  elif ([.[] | select(.folder == $folder)] | length) == 0
-  then error("empty folder")
-  elif any(.[] | select(.folder == $folder); .type != "Note")
-  then error("wrong item type")
-  elif ([.[] | select(.folder == $folder) | .id] | group_by(.) | any(length > 1))
-  then error("duplicate id")
-  else .[] | select(.folder == $folder) |
-    if (.id + .name | test("[\\t\\r\\n]")) then error("unsafe metadata")
-    else [.id, .name] | @tsv end
+if ! entries=$(printf '%s' "$list_json" | "$jq" -ser --arg folder "$folder" '
+  if length != 1 then error("multiple documents") else .[0] |
+    if type != "array" or any(.[];
+        type != "object" or
+        (.id | type != "string" or length == 0) or
+        (.name | type != "string" or length == 0) or
+        (.folder | type != "string" and type != "null") or
+        (.type | type != "string" or length == 0))
+    then error("malformed list")
+    elif ([.[] | select(.folder == $folder)] | length) == 0
+    then error("empty folder")
+    elif any(.[] | select(.folder == $folder); .type != "Note")
+    then error("wrong item type")
+    elif ([.[] | select(.folder == $folder) | .id] | group_by(.) | any(length > 1))
+    then error("duplicate id")
+    else .[] | select(.folder == $folder) |
+      if (.id + .name | test("[\\t\\r\\n]")) then error("unsafe metadata")
+      else [.id, .name] | @tsv end
+    end
   end
 ' 2>/dev/null); then
   fail 'folder results are malformed, empty, or ambiguous'
@@ -91,13 +186,15 @@ done <<<"$entries"
 
 for ((i=0; i<${#keys[@]}; i++)); do
   # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
-  if ! value=$("$rbw" get "${ids[$i]}" --raw 2>/dev/null | "$jq" -er \
+  if ! value=$("$rbw" get "${ids[$i]}" --raw 2>/dev/null | "$jq" -ser \
       --arg id "${ids[$i]}" --arg folder "$folder" --arg name "${keys[$i]}" '
-        select(type == "object" and .id == $id and .folder == $folder and .name == $name and
-          has("data") and .data == null and (.notes | type) == "string") |
-        (.notes | split("\n")[0] | rtrimstr("\r")) as $value |
-        select(($value | length) > 0 and ($value | contains("\u0000") | not)) |
-        $value
+        if length != 1 then error("multiple documents") else .[0] |
+          select(type == "object" and .id == $id and .folder == $folder and .name == $name and
+            has("data") and .data == null and (.notes | type) == "string") |
+          (.notes | split("\n")[0] | rtrimstr("\r")) as $value |
+          select(($value | length) > 0 and ($value | contains("\u0000") | not)) |
+          $value
+        end
       ' 2>/dev/null); then
     fail 'a Secure Note is missing, malformed, ambiguous, or has an empty first line'
   fi

@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.1.3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.2.0/install.sh | bash
 ```
 
-Installs the fixed `v0.1.3` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
+Installs the fixed `v0.2.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}`, verifies its checked-in SHA-256, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -21,6 +21,23 @@ Create one **Secure Note** per variable in one folder:
 Only items whose folder name exactly matches the argument are used. Child folders are not traversed.
 
 ## Usage
+
+List usable Secure Note selectors without fetching secret values:
+
+```bash
+rbw-env list
+```
+
+Read one value by selector:
+
+```bash
+rbw-env show hermes/production/API_TOKEN
+API_TOKEN="$(rbw-env show hermes/production/API_TOKEN)"
+```
+
+`show` deliberately writes the secret value to stdout. Normally use command substitution as above; do not send its output to logs.
+
+`list` and `show` are reserved subcommands. To use either word as an exact folder name, disambiguate it with `--folder`, for example `rbw-env --folder list`.
 
 Emit lines for a Hermes command secret source:
 
