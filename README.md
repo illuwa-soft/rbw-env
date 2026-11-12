@@ -93,10 +93,23 @@ rbw unlock
 
 `rbw-env` never accepts a master password in arguments or environment variables, creates a secret temp file, enables shell tracing, or includes secret values in its own errors or command arguments.
 
+## Lookup failures
+
+The source version adds a short lookup-failure hint; the pinned `v0.4.0`
+installer above still installs the previous release.
+
+`rbw-env` supports Secure Notes, not Login fields. It lists the vault before
+selecting a folder or note, so an `invalid mac` error may come from another item;
+it does not establish that the requested item is damaged. Use `rbw get` directly
+with an item UUID verified in the official client, rather than a name/path.
+Keep secret output out of terminal captures, agent output and logs. In rbw 1.15.0,
+an absent UUID falls back to name search; direct lookup is not a guaranteed fix.
+Stop if it fails. `rbw-env` does not automatically retry or switch items.
+
 ## Test
 
 ```bash
 ./test.sh
 ```
 
-The dependency-free test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and the installed Hermes parser. It never contacts a vault or the network.
+The test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and the installed Hermes parser. Installer fixtures come from the local `v0.4.0` Git tag; runtime tests use the working tree. It never contacts a vault or the network.
