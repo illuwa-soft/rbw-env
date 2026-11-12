@@ -10,8 +10,8 @@ printf '%s\n' 'PROFILE_SENTINEL' >"$TMP/home/.zshrc"
 REAL_JQ=$(command -v jq)
 PYTHON3=$(command -v python3)
 # The installer deliberately downloads the released artifact, not working-tree bytes.
-git -C "$ROOT" show v0.4.0:rbw-env >"$TMP/released-rbw-env"
-git -C "$ROOT" show v0.4.0:_rbw-env >"$TMP/released-completion"
+git -C "$ROOT" show d3e398cdcb875c292f6585b4ad98ba92a6d20bb0:rbw-env >"$TMP/released-rbw-env"
+git -C "$ROOT" show d3e398cdcb875c292f6585b4ad98ba92a6d20bb0:_rbw-env >"$TMP/released-completion"
 export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$TMP/released-rbw-env" RBW_COMPLETION_DOWNLOAD_SOURCE="$TMP/released-completion" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
 
 cat >"$TMP/bin/jq" <<'SH'
@@ -26,8 +26,8 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/bin/bash
 [ "$#" -eq 4 ] && [ "$1" = -fsSL ] && [ "$3" = -o ] || exit 2
 printf '%s\n%s\n%s\n' "$2" "$4" "$(umask)" >>"$RBW_CURL_LOG"
-[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/rbw-env' ] ||
-  [ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/_rbw-env' ] || exit 22
+[ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/rbw-env' ] ||
+  [ "$2" = 'https://raw.githubusercontent.com/illuwa-soft/rbw-env/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/_rbw-env' ] || exit 22
 case "$2:${RBW_CURL_CASE:-ok}" in
   */rbw-env:corrupt) printf '%s\n' SECRET_CORRUPT_DOWNLOAD >"$4" ;;
   */_rbw-env:corrupt_completion) printf '%s\n' SECRET_CORRUPT_COMPLETION_DOWNLOAD >"$4" ;;
@@ -434,8 +434,10 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 
 : >"$RBW_CURL_LOG"
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
-check "installer ignores mutable ref override and uses v0.4.0" contains "$RBW_CURL_LOG" '/v0.4.0/rbw-env'
-check "installer downloads immutable v0.4.0 completion" contains "$RBW_CURL_LOG" '/v0.4.0/_rbw-env'
+check "installer ignores mutable ref override and uses pinned commit" contains "$RBW_CURL_LOG" '/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/rbw-env'
+check "installer downloads immutable completion" contains "$RBW_CURL_LOG" '/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/_rbw-env'
+check "installer helper is current, not a stale release" cmp -s "$RBW_DOWNLOAD_SOURCE" "$ROOT/rbw-env"
+check "installer completion is current, not a stale release" cmp -s "$RBW_COMPLETION_DOWNLOAD_SOURCE" "$ROOT/_rbw-env"
 check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$RBW_DOWNLOAD_SOURCE")"
 check "installer writes exact checked completion bytes" equals "$TMP/completions/_rbw-env" "$(cat "$RBW_COMPLETION_DOWNLOAD_SOURCE")"
 rbw_hash=$(shasum -a 256 "$RBW_DOWNLOAD_SOURCE"); rbw_hash=${rbw_hash%% *}
