@@ -9,7 +9,10 @@ mkdir -p "$TMP/home/.local/bin"
 printf '%s\n' 'PROFILE_SENTINEL' >"$TMP/home/.zshrc"
 REAL_JQ=$(command -v jq)
 PYTHON3=$(command -v python3)
-export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$ROOT/rbw-env" RBW_COMPLETION_DOWNLOAD_SOURCE="$ROOT/_rbw-env" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
+# The installer deliberately downloads the released artifact, not working-tree bytes.
+git -C "$ROOT" show v0.4.0:rbw-env >"$TMP/released-rbw-env"
+git -C "$ROOT" show v0.4.0:_rbw-env >"$TMP/released-completion"
+export REAL_JQ RBW_LOG="$TMP/rbw.log" RBW_DOWNLOAD_SOURCE="$TMP/released-rbw-env" RBW_COMPLETION_DOWNLOAD_SOURCE="$TMP/released-completion" RBW_CURL_LOG="$TMP/curl.log" PACKAGE_LOG="$TMP/package.log"
 
 cat >"$TMP/bin/jq" <<'SH'
 #!/bin/bash
@@ -96,6 +99,7 @@ case "$1" in
   config) "$REAL_JQ" -cn --arg pinentry "${RBW_CONFIG_PINENTRY-pinentry}" '{pinentry:$pinentry}' ;;
   list)
     case "${RBW_CASE:-ok}" in
+      list_failure) printf '%s\n' SECRET_PARTIAL_LIST; printf '%s\n' 'failed to decrypt encrypted secret: invalid mac SECRET_ERROR' >&2; exit 1 ;;
       malformed) printf '%s\n' 'not-json' ;;
       list_ok) printf '%s\n' '[{"id":"7","name":"Z_KEY","folder":"team/PROD","type":"Note"},{"id":"8","name":"ignored-name","folder":"team/PROD","type":"Note"},{"id":"9","name":"A_KEY","folder":"alpha","type":"Note"},{"id":"10","name":"LOGIN","folder":"team/PROD","type":"Login"},{"id":"11","name":"NULL_FOLDER","folder":null,"type":"Note"},{"id":"12","name":"PROD","folder":"team","type":"Note"},{"id":"13","name":"ROOT","folder":"zeta","type":"Note"}]' ;;
       list_empty_component) printf '%s\n' '[{"id":"14","name":"ONE","folder":"/team","type":"Note"},{"id":"15","name":"TWO","folder":"team/","type":"Note"},{"id":"16","name":"THREE","folder":"team//prod","type":"Note"}]' ;;
@@ -190,6 +194,30 @@ contains() { case $(cat "$1") in *"$2"*) return 0;; *) return 1;; esac; }
 not_contains() { ! contains "$1" "$2"; }
 count_log() { [ "$(grep -c "^$2$" "$1" || :)" -eq "$3" ]; }
 count_prefix_log() { [ "$(grep -c "^$2" "$1" || :)" -eq "$3" ]; }
+
+for lookup_mode in folder command list show completion; do
+  : >"$RBW_LOG"
+  case $lookup_mode in
+    folder) set -- target ;;
+    command) set -- target -- show-env ;;
+    list) set -- list ;;
+    show) set -- show team/prod/API_TOKEN ;;
+    completion) set -- __complete-show team/ ;;
+  esac
+  status=0
+  RBW_ENV_INTERNAL_COMPLETE=1 RBW_CASE=list_failure run "$TMP/out" "$TMP/err" "$@" || status=$?
+  if [ "$lookup_mode" = completion ]; then
+    check "failed completion stays silent" test ! -s "$TMP/err"
+    check "failed completion succeeds silently" test "$status" -eq 0
+  else
+    check "$lookup_mode list failure exits 1" test "$status" -eq 1
+    check "$lookup_mode gives concise verified UUID guidance" contains "$TMP/err" 'use rbw get with a verified item UUID (not name/path)'
+    check "$lookup_mode hides upstream output" not_contains "$TMP/err" SECRET_
+  fi
+  check "$lookup_mode list failure emits no stdout or child output" test ! -s "$TMP/out"
+  check "$lookup_mode list failure never fetches or falls back" count_prefix_log "$RBW_LOG" 'get ' 0
+  check "$lookup_mode lists only once" count_log "$RBW_LOG" 'list --raw' 1
+done
 
 : >"$RBW_LOG"
 run "$TMP/out" "$TMP/err" target || fail dotenv
@@ -415,10 +443,10 @@ check "command omission after -- is rejected" contains "$TMP/err" 'command requi
 RBW_ENV_VERSION=main run_install || fail "fixed installer ref"
 check "installer ignores mutable ref override and uses v0.4.0" contains "$RBW_CURL_LOG" '/v0.4.0/rbw-env'
 check "installer downloads immutable v0.4.0 completion" contains "$RBW_CURL_LOG" '/v0.4.0/_rbw-env'
-check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$ROOT/rbw-env")"
-check "installer writes exact checked completion bytes" equals "$TMP/completions/_rbw-env" "$(cat "$ROOT/_rbw-env")"
-rbw_hash=$(shasum -a 256 "$ROOT/rbw-env"); rbw_hash=${rbw_hash%% *}
-completion_hash=$(shasum -a 256 "$ROOT/_rbw-env"); completion_hash=${completion_hash%% *}
+check "installer writes exact checked helper bytes" equals "$TMP/install/rbw-env" "$(cat "$RBW_DOWNLOAD_SOURCE")"
+check "installer writes exact checked completion bytes" equals "$TMP/completions/_rbw-env" "$(cat "$RBW_COMPLETION_DOWNLOAD_SOURCE")"
+rbw_hash=$(shasum -a 256 "$RBW_DOWNLOAD_SOURCE"); rbw_hash=${rbw_hash%% *}
+completion_hash=$(shasum -a 256 "$RBW_COMPLETION_DOWNLOAD_SOURCE"); completion_hash=${completion_hash%% *}
 check "installer embeds exact rbw-env checksum" contains "$ROOT/install.sh" "expected=$rbw_hash"
 check "installer embeds exact completion checksum" contains "$ROOT/install.sh" "completion_expected=$completion_hash"
 cp "$TMP/install/rbw-env" "$TMP/installed-before-failure"

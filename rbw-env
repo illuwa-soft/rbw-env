@@ -152,7 +152,7 @@ if ! "$rbw" unlocked >/dev/null 2>&1; then
 fi
 
 if ! list_json=$("$rbw" list --raw 2>/dev/null); then
-  fail 'could not enumerate rbw entries'
+  fail 'could not enumerate rbw entries; for invalid mac, use rbw get with a verified item UUID (not name/path); keep secret output out of logs'
 fi
 if [ "$mode" = list ]; then
   # shellcheck disable=SC2016 # jq programs expand jq variables, not shell variables.
