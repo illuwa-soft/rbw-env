@@ -55,15 +55,14 @@ cat >"$TMP/bin/show-env" <<'SH'
 printf 'TOKEN=%s\nargc=%s\n' "$API_TOKEN" "$#"
 for arg in "$@"; do printf '<%s>\n' "$arg"; done
 SH
-cat >"$TMP/hermes-parser.py" <<'PY'
+cat >"$TMP/output-contract.py" <<'PY'
 import os
 import sys
 
-from agent.secret_sources.command import parse_secret_output
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    actual = parse_secret_output(stream.read(), "API_TOKEN")
-assert actual == os.environ["EXPECTED"], (actual, os.environ["EXPECTED"])
+with open(sys.argv[1], "rb") as stream:
+    actual = stream.read()
+expected = b"API_TOKEN='" + os.environ["EXPECTED"].encode("utf-8") + b"'\n"
+assert actual == expected, "output bytes do not match the first-line contract"
 PY
 cat >"$TMP/pty-run.py" <<'PY'
 import os
@@ -358,18 +357,12 @@ done
 run_home_bin() { HOME="$TMP/home" PATH="$TMP/with-deps" BASH_ENV='' ENV='' REAL_JQ="$REAL_JQ" /bin/bash "$ROOT/rbw-env" target >"$TMP/out" 2>"$TMP/err"; equals "$TMP/out" "API_TOKEN='fake-value'"; }
 check "rbw resolves from conventional HOME user bin when PATH omits it" run_home_bin
 
-HERMES_PYTHON=${HERMES_PYTHON:-}
-if [ -z "$HERMES_PYTHON" ]; then
-  hermes_bin=$(command -v hermes || :)
-  [ -n "$hermes_bin" ] && HERMES_PYTHON=${hermes_bin%/*}/python
-fi
-[ -x "$HERMES_PYTHON" ] || fail "installed Hermes Python not found"
 # shellcheck disable=SC2016 # Dollar expressions are literal parser test data.
-for value in ' leading' 'trailing ' ' before #' 'attached#' 'a"b' "a'b" '"matching"' "'matching'" 'a\b' '$BARE' '${BRACED}' 'a=b'; do
-  RBW_VALUE=$value run "$TMP/out" "$TMP/err" target || fail "Hermes value output"
-  EXPECTED=$value "$HERMES_PYTHON" "$TMP/hermes-parser.py" "$TMP/out" || fail "Hermes parser round trip"
+for value in ' leading' 'trailing ' ' before #' 'attached#' 'a"b' "a'b" '"matching"' "'matching'" 'a\b' '$BARE' '${BRACED}' 'a=b' $'tab\tvalue' '한글🔑'; do
+  RBW_VALUE=$value run "$TMP/out" "$TMP/err" target || fail "first-line value output"
+  EXPECTED=$value "$PYTHON3" "$TMP/output-contract.py" "$TMP/out" || fail "output byte contract"
 done
-check "supported values round-trip through installed Hermes parser" true
+check "output preserves first-line bytes, outer quotes and exactly one newline" true
 
 # shellcheck disable=SC2016 # Literal argv verifies that no shell expansion occurs.
 run "$TMP/out" "$TMP/err" target -- show-env 'two words' 'literal;$HOME' || fail inline
