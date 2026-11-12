@@ -5,10 +5,10 @@ Minimal Bash bridge from an exact [rbw](https://github.com/doy/rbw) folder to en
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/main/install.sh | bash
 ```
 
-Installs the fixed `v0.4.0` helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}` and its zsh completion to `${RBW_ENV_ZSH_COMPLETION_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions}`, verifies separate checked-in SHA-256 values, and never edits shell profiles. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. Install `jq` separately with your system package manager (for example, `brew install jq` on macOS); the installer never installs packages. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
+Installs the current published helper to `${RBW_ENV_INSTALL_DIR:-$HOME/.local/bin}` and its zsh completion to `${RBW_ENV_ZSH_COMPLETION_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions}`, verifies separate checked-in SHA-256 values, and never edits shell profiles. The same command updates an existing installation. The entry point follows `main`; each installer pins both downloads to an immutable commit and verifies their checksums. Requires Bash, `curl`, `rbw`, `jq`, `mktemp`, a SHA-256 command (`sha256sum` or `shasum`), and a usable pinentry implementation. Install `jq` separately with your system package manager (for example, `brew install jq` on macOS); the installer never installs packages. If rbw config names a pinentry, that exact command or path must be usable; PATH discovery is used only when no pinentry is configured.
 
 ## Bitwarden layout
 
@@ -61,7 +61,7 @@ exec zsh
 If you use Oh My Zsh and do not want to add the default directory to `fpath`, install the completion directly into its existing custom completion directory instead:
 
 ```zsh
-curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/install.sh |
+curl -fsSL https://raw.githubusercontent.com/illuwa-soft/rbw-env/main/install.sh |
 RBW_ENV_ZSH_COMPLETION_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/completions" bash
 ```
 
@@ -95,9 +95,6 @@ rbw unlock
 
 ## Lookup failures
 
-The source version adds a short lookup-failure hint; the pinned `v0.4.0`
-installer above still installs the previous release.
-
 `rbw-env` supports Secure Notes, not Login fields. It lists the vault before
 selecting a folder or note, so an `invalid mac` error may come from another item;
 it does not establish that the requested item is damaged. Use `rbw get` directly
@@ -112,4 +109,6 @@ Stop if it fails. `rbw-env` does not automatically retry or switch items.
 ./test.sh
 ```
 
-The test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and standard-library-only `python3` for exact output bytes and PTY checks. Hermes is not required; this tests rbw-env's output contract, not a consumer's parser. Installer fixtures come from the local `v0.4.0` Git tag; runtime tests use the working tree. It never contacts a vault or the network.
+The test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and standard-library-only `python3` for exact output bytes and PTY checks. Hermes is not required; this tests rbw-env's output contract, not a consumer's parser. Installer fixtures come from its pinned Git commit and must match the working-tree helper and completion. It never contacts a vault or the network.
+
+When publishing helper or completion changes, update the installer's immutable commit URLs and checksums to the merged source before considering deployment complete. The tests reject stale installer artifacts. Explicit old tag URLs remain historical versions; use the default `main/install.sh` command for updates.

@@ -59,10 +59,10 @@ completion_pending=$(mktemp "$completion_dir/._rbw-env.XXXXXX") || {
   fail 'could not create completion staging file'
 }
 trap cleanup_install EXIT HUP INT TERM
-if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/rbw-env" -o "$pending"; then
+if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/rbw-env" -o "$pending"; then
   fail 'rbw-env download failed'
 fi
-if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/v0.4.0/_rbw-env" -o "$completion_pending"; then
+if ! curl -fsSL "https://raw.githubusercontent.com/illuwa-soft/rbw-env/d3e398cdcb875c292f6585b4ad98ba92a6d20bb0/_rbw-env" -o "$completion_pending"; then
   fail 'completion download failed'
 fi
 [ -f "$pending" ] && [ ! -L "$pending" ] || fail 'rbw-env download is not a regular file'
@@ -73,7 +73,7 @@ fi
 if [ -e "$completion_destination" ] || [ -L "$completion_destination" ]; then
   [ -f "$completion_destination" ] && [ ! -L "$completion_destination" ] || fail 'completion destination is not a regular file'
 fi
-expected=7c554d9ac9dd3e1e45959d4eed6a393604ee034913c083e276fe46a1bec7f9f7
+expected=d32dd30eccb24790a00ed552670b177af1df957631944d84d728e6bddfa675d4
 completion_expected=6d059409ae6bae741b4efc24297d8967f9ae46200873361a33e6eb5a8535b4a2
 if command -v sha256sum >/dev/null 2>&1; then
   checksum=$(sha256sum "$pending") || fail 'rbw-env checksum calculation failed'
