@@ -112,4 +112,4 @@ Stop if it fails. `rbw-env` does not automatically retry or switch items.
 ./test.sh
 ```
 
-The test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and the installed Hermes parser. Installer fixtures come from the local `v0.4.0` Git tag; runtime tests use the working tree. It never contacts a vault or the network.
+The test uses fake `rbw`, pinentry, and `curl` commands, a thin wrapper around the host `jq`, and standard-library-only `python3` for exact output bytes and PTY checks. Hermes is not required; this tests rbw-env's output contract, not a consumer's parser. Installer fixtures come from the local `v0.4.0` Git tag; runtime tests use the working tree. It never contacts a vault or the network.
